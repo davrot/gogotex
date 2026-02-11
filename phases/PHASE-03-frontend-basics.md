@@ -500,8 +500,8 @@ import apiClient from './api'
 import { LoginResponse, RefreshResponse, User } from '@/types/api'
 
 const KEYCLOAK_URL = import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8080'
-const KEYCLOAK_REALM = import.meta.env.VITE_KEYCLOAK_REALM || 'gogolatex'
-const KEYCLOAK_CLIENT_ID = import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'gogolatex-backend'
+const KEYCLOAK_REALM = import.meta.env.VITE_KEYCLOAK_REALM || 'gogotex'
+const KEYCLOAK_CLIENT_ID = import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'gogotex-backend'
 const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI || 'http://localhost:3000/auth/callback'
 
 class AuthService {
@@ -693,8 +693,8 @@ VITE_WS_URL=http://localhost:4000
 
 # Keycloak Configuration
 VITE_KEYCLOAK_URL=http://localhost:8080
-VITE_KEYCLOAK_REALM=gogolatex
-VITE_KEYCLOAK_CLIENT_ID=gogolatex-backend
+VITE_KEYCLOAK_REALM=gogotex
+VITE_KEYCLOAK_CLIENT_ID=gogotex-backend
 VITE_REDIRECT_URI=http://localhost:3000/auth/callback
 
 # Feature Flags
@@ -713,8 +713,8 @@ VITE_WS_URL=http://localhost:4000
 
 # Keycloak Configuration
 VITE_KEYCLOAK_URL=http://localhost:8080
-VITE_KEYCLOAK_REALM=gogolatex
-VITE_KEYCLOAK_CLIENT_ID=gogolatex-backend
+VITE_KEYCLOAK_REALM=gogotex
+VITE_KEYCLOAK_CLIENT_ID=gogotex-backend
 VITE_REDIRECT_URI=http://localhost:3000/auth/callback
 ```
 
@@ -1133,7 +1133,7 @@ export const Header: React.FC = () => {
       <div className="flex items-center gap-4">
         <Link to="/" className="flex items-center gap-2 hover:text-vscode-primary transition-colors">
           <FileText className="w-5 h-5" />
-          <span className="font-semibold">GogoLaTeX</span>
+          <span className="font-semibold">gogotex</span>
         </Link>
       </div>
 
@@ -1301,7 +1301,7 @@ export const LoginPage: React.FC = () => {
           <div className="flex justify-center mb-4">
             <FileText className="w-16 h-16 text-vscode-primary" />
           </div>
-          <h1 className="text-3xl font-bold mb-2">GogoLaTeX</h1>
+          <h1 className="text-3xl font-bold mb-2">gogotex</h1>
           <p className="text-vscode-textMuted">
             Collaborative LaTeX Editor
           </p>
@@ -1321,7 +1321,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         <div className="mt-8 text-center text-sm text-vscode-textMuted">
-          <p>New to GogoLaTeX?</p>
+          <p>New to gogotex?</p>
           <p className="mt-2">
             Contact your administrator to create an account
           </p>
@@ -1661,7 +1661,7 @@ Update: `index.html`
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="description" content="Collaborative LaTeX Editor" />
-    <title>GogoLaTeX - Collaborative LaTeX Editor</title>
+    <title>gogotex - Collaborative LaTeX Editor</title>
   </head>
   <body>
     <div id="root"></div>
@@ -2229,8 +2229,8 @@ npm run dev
 
 # Build Docker
 cd ../
-docker-compose build gogolatex-frontend
-docker-compose up -d gogolatex-frontend
+docker-compose build gogotex-frontend
+docker-compose up -d gogotex-frontend
 
 # Access frontend
 open http://localhost:3000

@@ -27,7 +27,7 @@ cd latex-collaborative-editor/backend/go-services
 
 # Already initialized in Phase 2, verify:
 cat go.mod
-# Should show: module github.com/yourusername/gogolatex
+# Should show: module github.com/yourusername/gogotex
 ```
 
 ### 1.2 Create Document Service Directories
@@ -296,7 +296,7 @@ func LoadMinIOConfig() *MinIOConfig {
 		Endpoint:        getEnv("MINIO_ENDPOINT", "localhost:9000"),
 		AccessKeyID:     getEnv("MINIO_ACCESS_KEY", "minioadmin"),
 		SecretAccessKey: getEnv("MINIO_SECRET_KEY", "minioadmin"),
-		BucketName:      getEnv("MINIO_BUCKET", "gogolatex"),
+		BucketName:      getEnv("MINIO_BUCKET", "gogotex"),
 		UseSSL:          getEnv("MINIO_USE_SSL", "false") == "true",
 		Region:          getEnv("MINIO_REGION", "us-east-1"),
 	}
@@ -498,7 +498,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -777,7 +777,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -979,8 +979,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/document/repository"
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/document/repository"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -1222,9 +1222,9 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/yourusername/gogolatex/internal/document/repository"
-	"github.com/yourusername/gogolatex/internal/models"
-	"github.com/yourusername/gogolatex/internal/storage"
+	"github.com/yourusername/gogotex/internal/document/repository"
+	"github.com/yourusername/gogotex/internal/models"
+	"github.com/yourusername/gogotex/internal/storage"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -1591,8 +1591,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/yourusername/gogolatex/internal/document/service"
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/document/service"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -1901,8 +1901,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/yourusername/gogolatex/internal/document/service"
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/document/service"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -2172,13 +2172,13 @@ PORT=5002
 
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017,localhost:27018,localhost:27019/?replicaSet=rs0
-MONGODB_DATABASE=gogolatex
+MONGODB_DATABASE=gogotex
 
 # MinIO
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=gogolatex
+MINIO_BUCKET=gogotex
 MINIO_USE_SSL=false
 MINIO_REGION=us-east-1
 
@@ -2211,12 +2211,12 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/yourusername/gogolatex/internal/database"
-	"github.com/yourusername/gogolatex/internal/document/handler"
-	"github.com/yourusername/gogolatex/internal/document/repository"
-	"github.com/yourusername/gogolatex/internal/document/service"
-	"github.com/yourusername/gogolatex/internal/storage"
-	"github.com/yourusername/gogolatex/pkg/middleware"
+	"github.com/yourusername/gogotex/internal/database"
+	"github.com/yourusername/gogotex/internal/document/handler"
+	"github.com/yourusername/gogotex/internal/document/repository"
+	"github.com/yourusername/gogotex/internal/document/service"
+	"github.com/yourusername/gogotex/internal/storage"
+	"github.com/yourusername/gogotex/pkg/middleware"
 )
 
 func main() {
@@ -2412,44 +2412,44 @@ Add document service to: `docker-compose.yml`
 services:
   # ... existing services ...
 
-  gogolatex-document-service:
+  gogotex-document-service:
     build:
       context: ./backend/go-services
       dockerfile: ../../docker/go-services/Dockerfile
       args:
         SERVICE_NAME: document
-    container_name: gogolatex-document-service
+    container_name: gogotex-document-service
     ports:
       - "5002:5002"
     environment:
       PORT: "5002"
-      MONGODB_URI: "mongodb://gogolatex-mongodb-1:27017,gogolatex-mongodb-2:27017,gogolatex-mongodb-3:27017/?replicaSet=rs0"
-      MONGODB_DATABASE: "gogolatex"
-      MINIO_ENDPOINT: "gogolatex-minio:9000"
+      MONGODB_URI: "mongodb://gogotex-mongodb-1:27017,gogotex-mongodb-2:27017,gogotex-mongodb-3:27017/?replicaSet=rs0"
+      MONGODB_DATABASE: "gogotex"
+      MINIO_ENDPOINT: "gogotex-minio:9000"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "changeme_minio"
-      MINIO_BUCKET: "gogolatex"
+      MINIO_BUCKET: "gogotex"
       MINIO_USE_SSL: "false"
       MINIO_REGION: "us-east-1"
       JWT_SECRET: "your-secret-key-change-in-production"
       ALLOWED_ORIGINS: "http://localhost:3000"
     depends_on:
-      - gogolatex-mongodb-1
-      - gogolatex-mongodb-2
-      - gogolatex-mongodb-3
-      - gogolatex-minio
+      - gogotex-mongodb-1
+      - gogotex-mongodb-2
+      - gogotex-mongodb-3
+      - gogotex-minio
     networks:
-      - gogolatex
+      - gogotex
     restart: unless-stopped
 ```
 
 **Verification**:
 ```bash
 # Build and start document service
-docker-compose up -d gogolatex-document-service
+docker-compose up -d gogotex-document-service
 
 # Check logs
-docker-compose logs -f gogolatex-document-service
+docker-compose logs -f gogotex-document-service
 
 # Test health endpoint
 curl http://localhost:5002/health
@@ -2522,13 +2522,13 @@ curl http://localhost:5002/health
 **Solution**:
 - Verify MongoDB replica set is initialized
 - Check `MONGODB_URI` has all three nodes
-- Test connection: `docker exec gogolatex-mongodb-1 mongo --eval "rs.status()"`
+- Test connection: `docker exec gogotex-mongodb-1 mongo --eval "rs.status()"`
 
 ### MinIO upload fails
 **Solution**:
 - Check MinIO is running: `docker ps | grep minio`
 - Verify credentials in `.env`
-- Check bucket exists: `mc ls minio/gogolatex`
+- Check bucket exists: `mc ls minio/gogotex`
 
 ### "Access denied" on project
 **Solution**:

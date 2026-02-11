@@ -93,9 +93,9 @@ Update `package.json`:
 
 ```json
 {
-  "name": "gogolatex-realtime-server",
+  "name": "gogotex-realtime-server",
   "version": "1.0.0",
-  "description": "Real-time collaboration server for GoGoLaTeX",
+  "description": "Real-time collaboration server for gogotex",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
@@ -165,7 +165,7 @@ export const config: Config = {
     environment: process.env.SERVER_ENVIRONMENT || 'development',
   },
   redis: {
-    host: process.env.REDIS_HOST || 'gogolatex-redis-master',
+    host: process.env.REDIS_HOST || 'gogotex-redis-master',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD || '',
     db: 0,
@@ -200,7 +200,7 @@ REALTIME_PORT=4000
 REALTIME_HOST=0.0.0.0
 
 # Already exists from Phase 2
-# REDIS_HOST=gogolatex-redis-master
+# REDIS_HOST=gogotex-redis-master
 # REDIS_PORT=6379
 # REDIS_PASSWORD=changeme_redis
 # JWT_SECRET=your_super_secret_jwt_key_at_least_32_characters_long_please_change_this
@@ -1096,7 +1096,7 @@ let collaborationService: CollaborationService;
 
 async function startServer() {
   try {
-    logger.info('Starting GoGoLaTeX Realtime Server', {
+    logger.info('Starting gogotex Realtime Server', {
       environment: config.server.environment,
       port: config.server.port,
     });
@@ -1433,18 +1433,18 @@ Add to `latex-collaborative-editor/docker-compose.yml`:
   # Node.js Realtime Server
   # ============================================================================
 
-  gogolatex-realtime-server:
+  gogotex-realtime-server:
     build:
       context: .
       dockerfile: docker/node-services/Dockerfile
-    container_name: gogolatex-realtime-server
-    hostname: gogolatex-realtime-server
+    container_name: gogotex-realtime-server
+    hostname: gogotex-realtime-server
     restart: unless-stopped
     environment:
       REALTIME_PORT: 4000
       REALTIME_HOST: 0.0.0.0
       SERVER_ENVIRONMENT: ${SERVER_ENVIRONMENT:-development}
-      REDIS_HOST: gogolatex-redis-master
+      REDIS_HOST: gogotex-redis-master
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
@@ -1452,10 +1452,10 @@ Add to `latex-collaborative-editor/docker-compose.yml`:
     ports:
       - "4000:4000"
     networks:
-      gogolatex-network:
+      gogotex-network:
         ipv4_address: 172.28.0.71
     depends_on:
-      gogolatex-redis-master:
+      gogotex-redis-master:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/health"]
@@ -1466,11 +1466,11 @@ Add to `latex-collaborative-editor/docker-compose.yml`:
 
 ### 10.3 Update nginx Configuration
 
-Update `latex-collaborative-editor/config/nginx/conf.d/gogolatex.conf`:
+Update `latex-collaborative-editor/config/nginx/conf.d/gogotex.conf`:
 
 ```nginx
 upstream realtime_server {
-    server gogolatex-realtime-server:4000;
+    server gogotex-realtime-server:4000;
 }
 
 # Add to server block:
@@ -1492,9 +1492,9 @@ upstream realtime_server {
 **Verification**:
 ```bash
 cd latex-collaborative-editor
-docker-compose build gogolatex-realtime-server
-docker-compose up -d gogolatex-realtime-server
-docker-compose logs -f gogolatex-realtime-server
+docker-compose build gogotex-realtime-server
+docker-compose up -d gogotex-realtime-server
+docker-compose logs -f gogotex-realtime-server
 ```
 
 ---
@@ -1543,11 +1543,11 @@ docker-compose logs -f gogolatex-realtime-server
 ```bash
 # Build and start
 cd latex-collaborative-editor
-docker-compose build gogolatex-realtime-server
-docker-compose up -d gogolatex-realtime-server
+docker-compose build gogotex-realtime-server
+docker-compose up -d gogotex-realtime-server
 
 # Check logs
-docker-compose logs -f gogolatex-realtime-server
+docker-compose logs -f gogotex-realtime-server
 
 # Test health
 curl http://localhost:4000/health
@@ -1556,7 +1556,7 @@ curl http://localhost:4000/health
 curl http://localhost:4000/stats
 
 # Check Redis
-docker exec gogolatex-redis-master redis-cli -a changeme_redis KEYS "yjs:*"
+docker exec gogotex-redis-master redis-cli -a changeme_redis KEYS "yjs:*"
 ```
 
 ---

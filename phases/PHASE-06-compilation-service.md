@@ -189,7 +189,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 )
 
 // LogParser parses LaTeX compilation logs
@@ -1259,10 +1259,10 @@ CMD ["/bin/bash"]
 ```bash
 # Build Docker image
 cd docker/latex-compiler
-docker build -t gogolatex-compiler .
+docker build -t gogotex-compiler .
 
 # Test
-docker run --rm gogolatex-compiler pdflatex --version
+docker run --rm gogotex-compiler pdflatex --version
 ```
 
 ---
@@ -1281,7 +1281,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -1505,13 +1505,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yourusername/gogolatex/internal/compiler/docker"
-	"github.com/yourusername/gogolatex/internal/compiler/parser"
-	"github.com/yourusername/gogolatex/internal/compiler/queue"
-	"github.com/yourusername/gogolatex/internal/compiler/repository"
-	"github.com/yourusername/gogolatex/internal/compiler/wasm"
-	"github.com/yourusername/gogolatex/internal/models"
-	"github.com/yourusername/gogolatex/internal/storage"
+	"github.com/yourusername/gogotex/internal/compiler/docker"
+	"github.com/yourusername/gogotex/internal/compiler/parser"
+	"github.com/yourusername/gogotex/internal/compiler/queue"
+	"github.com/yourusername/gogotex/internal/compiler/repository"
+	"github.com/yourusername/gogotex/internal/compiler/wasm"
+	"github.com/yourusername/gogotex/internal/models"
+	"github.com/yourusername/gogotex/internal/storage"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -1536,7 +1536,7 @@ func NewCompilationService(
 ) (*CompilationService, error) {
 	// Initialize compilers
 	wasmCompiler := wasm.NewCompiler("", filepath.Join(workingDir, "wasm"))
-	dockerCompiler, err := docker.NewCompiler("gogolatex-compiler", workingDir)
+	dockerCompiler, err := docker.NewCompiler("gogotex-compiler", workingDir)
 	if err != nil {
 		log.Printf("Warning: Docker compiler not available: %v", err)
 	}
@@ -1841,8 +1841,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
-	"github.com/yourusername/gogolatex/internal/compiler/service"
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/compiler/service"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -1983,7 +1983,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/compiler/service"
+	"github.com/yourusername/gogotex/internal/compiler/service"
 )
 
 // Pool manages compilation worker goroutines
@@ -2069,7 +2069,7 @@ PORT=5003
 
 # MongoDB
 MONGODB_URI=mongodb://localhost:27017,localhost:27018,localhost:27019/?replicaSet=rs0
-MONGODB_DATABASE=gogolatex
+MONGODB_DATABASE=gogotex
 
 # Redis
 REDIS_ADDR=localhost:6379
@@ -2080,7 +2080,7 @@ REDIS_DB=0
 MINIO_ENDPOINT=localhost:9000
 MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=gogolatex
+MINIO_BUCKET=gogotex
 MINIO_USE_SSL=false
 MINIO_REGION=us-east-1
 
@@ -2091,9 +2091,9 @@ JWT_SECRET=your-secret-key-change-in-production
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
 
 # Compilation
-WORKING_DIR=/tmp/gogolatex-compiler
+WORKING_DIR=/tmp/gogotex-compiler
 NUM_WORKERS=4
-DOCKER_IMAGE=gogolatex-compiler
+DOCKER_IMAGE=gogotex-compiler
 ```
 
 ### 9.3 Main Server
@@ -2116,14 +2116,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
-	"github.com/yourusername/gogolatex/internal/compiler/handler"
-	compilerRepo "github.com/yourusername/gogolatex/internal/compiler/repository"
-	"github.com/yourusername/gogolatex/internal/compiler/queue"
-	"github.com/yourusername/gogolatex/internal/compiler/service"
-	"github.com/yourusername/gogolatex/internal/compiler/worker"
-	"github.com/yourusername/gogolatex/internal/database"
-	"github.com/yourusername/gogolatex/internal/storage"
-	"github.com/yourusername/gogolatex/pkg/middleware"
+	"github.com/yourusername/gogotex/internal/compiler/handler"
+	compilerRepo "github.com/yourusername/gogotex/internal/compiler/repository"
+	"github.com/yourusername/gogotex/internal/compiler/queue"
+	"github.com/yourusername/gogotex/internal/compiler/service"
+	"github.com/yourusername/gogotex/internal/compiler/worker"
+	"github.com/yourusername/gogotex/internal/database"
+	"github.com/yourusername/gogotex/internal/storage"
+	"github.com/yourusername/gogotex/pkg/middleware"
 	"strconv"
 )
 
@@ -2175,7 +2175,7 @@ func main() {
 	// Initialize service
 	workingDir := os.Getenv("WORKING_DIR")
 	if workingDir == "" {
-		workingDir = "/tmp/gogolatex-compiler"
+		workingDir = "/tmp/gogotex-compiler"
 	}
 	os.MkdirAll(workingDir, 0755)
 
@@ -2310,44 +2310,44 @@ Add compilation service to: `docker-compose.yml`
 services:
   # ... existing services ...
 
-  gogolatex-compiler-service:
+  gogotex-compiler-service:
     build:
       context: ./backend/go-services
       dockerfile: ../../docker/go-services/Dockerfile
       args:
         SERVICE_NAME: compiler
-    container_name: gogolatex-compiler-service
+    container_name: gogotex-compiler-service
     ports:
       - "5003:5003"
     environment:
       PORT: "5003"
-      MONGODB_URI: "mongodb://gogolatex-mongodb-1:27017,gogolatex-mongodb-2:27017,gogolatex-mongodb-3:27017/?replicaSet=rs0"
-      MONGODB_DATABASE: "gogolatex"
-      REDIS_ADDR: "gogolatex-redis-master:6379"
+      MONGODB_URI: "mongodb://gogotex-mongodb-1:27017,gogotex-mongodb-2:27017,gogotex-mongodb-3:27017/?replicaSet=rs0"
+      MONGODB_DATABASE: "gogotex"
+      REDIS_ADDR: "gogotex-redis-master:6379"
       REDIS_PASSWORD: "changeme_redis"
       REDIS_DB: "0"
-      MINIO_ENDPOINT: "gogolatex-minio:9000"
+      MINIO_ENDPOINT: "gogotex-minio:9000"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "changeme_minio"
-      MINIO_BUCKET: "gogolatex"
+      MINIO_BUCKET: "gogotex"
       MINIO_USE_SSL: "false"
       MINIO_REGION: "us-east-1"
       JWT_SECRET: "your-secret-key-change-in-production"
       ALLOWED_ORIGINS: "http://localhost:3000"
       WORKING_DIR: "/tmp/compiler"
       NUM_WORKERS: "4"
-      DOCKER_IMAGE: "gogolatex-compiler"
+      DOCKER_IMAGE: "gogotex-compiler"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock  # Allow Docker compilation
       - compiler-working:/tmp/compiler
     depends_on:
-      - gogolatex-mongodb-1
-      - gogolatex-mongodb-2
-      - gogolatex-mongodb-3
-      - gogolatex-redis-master
-      - gogolatex-minio
+      - gogotex-mongodb-1
+      - gogotex-mongodb-2
+      - gogotex-mongodb-3
+      - gogotex-redis-master
+      - gogotex-minio
     networks:
-      - gogolatex
+      - gogotex
     restart: unless-stopped
 
 volumes:
@@ -2470,17 +2470,17 @@ chmod +x scripts/test-compilation.sh
 
 ```bash
 # Start services
-docker-compose up -d gogolatex-compiler-service
+docker-compose up -d gogotex-compiler-service
 
 # Check logs
-docker-compose logs -f gogolatex-compiler-service
+docker-compose logs -f gogotex-compiler-service
 
 # Test health endpoint
 curl http://localhost:5003/health | jq '.'
 
 # Build LaTeX compiler image
 cd docker/latex-compiler
-docker build -t gogolatex-compiler .
+docker build -t gogotex-compiler .
 
 # Test compilation locally
 cd ../../
@@ -2493,13 +2493,13 @@ cd ../../
 docker ps | grep compiler
 
 # Check worker logs
-docker logs gogolatex-compiler-service | grep "Worker"
+docker logs gogotex-compiler-service | grep "Worker"
 
 # Check queue
-docker exec gogolatex-redis-master redis-cli -a changeme_redis ZCARD "compilation:queue"
+docker exec gogotex-redis-master redis-cli -a changeme_redis ZCARD "compilation:queue"
 
 # Check processing jobs
-docker exec gogolatex-redis-master redis-cli -a changeme_redis HLEN "compilation:processing"
+docker exec gogotex-redis-master redis-cli -a changeme_redis HLEN "compilation:processing"
 ```
 
 ---

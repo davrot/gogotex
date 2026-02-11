@@ -122,7 +122,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -376,8 +376,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yourusername/gogolatex/internal/models"
-	"github.com/yourusername/gogolatex/internal/plugins/repository"
+	"github.com/yourusername/gogotex/internal/models"
+	"github.com/yourusername/gogotex/internal/plugins/repository"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -956,7 +956,7 @@ Create: `backend/go-services/internal/templates/builtin.go`
 ```go
 package templates
 
-import "github.com/yourusername/gogolatex/internal/models"
+import "github.com/yourusername/gogotex/internal/models"
 
 // GetBuiltInTemplates returns predefined templates
 func GetBuiltInTemplates() []models.DocumentTemplate {
@@ -968,7 +968,7 @@ func GetBuiltInTemplates() []models.DocumentTemplate {
 			Description: "Standard academic article template with abstract, sections, and references",
 			Category:    models.TemplateCategoryAcademic,
 			Tags:        []string{"article", "academic", "research"},
-			Author:      "GogoLaTeX",
+			Author:      "gogotex",
 			Featured:    true,
 			Enabled:     true,
 			Content: `\documentclass[11pt,a4paper]{article}
@@ -1020,7 +1020,7 @@ Summarize your conclusions.
 			Description: "Complete thesis template with chapters, table of contents, and bibliography",
 			Category:    models.TemplateCategoryThesis,
 			Tags:        []string{"thesis", "dissertation", "academic"},
-			Author:      "GogoLaTeX",
+			Author:      "gogotex",
 			Featured:    true,
 			Enabled:     true,
 			Content: `\documentclass[12pt,a4paper]{report}
@@ -1081,7 +1081,7 @@ Conclusion content.
 			Description: "Professional business letter template",
 			Category:    models.TemplateCategoryBusiness,
 			Tags:        []string{"letter", "business", "correspondence"},
-			Author:      "GogoLaTeX",
+			Author:      "gogotex",
 			Featured:    false,
 			Enabled:     true,
 			Content: `\documentclass[11pt]{letter}
@@ -1118,7 +1118,7 @@ This is the second paragraph with more information.
 			Description: "Clean and professional resume template",
 			Category:    models.TemplateCategoryResume,
 			Tags:        []string{"resume", "cv", "curriculum vitae"},
-			Author:      "GogoLaTeX",
+			Author:      "gogotex",
 			Featured:    true,
 			Enabled:     true,
 			Content: `\documentclass[11pt,a4paper]{article}
@@ -1174,7 +1174,7 @@ LinkedIn: linkedin.com/in/yourprofile | GitHub: github.com/yourusername
 			Description: "Modern presentation template using Beamer",
 			Category:    models.TemplateCategoryPresentation,
 			Tags:        []string{"presentation", "beamer", "slides"},
-			Author:      "GogoLaTeX",
+			Author:      "gogotex",
 			Featured:    true,
 			Enabled:     true,
 			Content: `\documentclass{beamer}
@@ -1239,7 +1239,7 @@ Thank you for your attention!
 			Description: "Template for writing book chapters",
 			Category:    models.TemplateCategoryBook,
 			Tags:        []string{"book", "chapter", "writing"},
-			Author:      "GogoLaTeX",
+			Author:      "gogotex",
 			Featured:    false,
 			Enabled:     true,
 			Content: `\documentclass[11pt,a4paper]{book}
@@ -3479,7 +3479,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yourusername/gogolatex/pkg/metrics"
+	"github.com/yourusername/gogotex/pkg/metrics"
 	"go.mongodb.org/mongo-driver/mongo"
 	"github.com/redis/go-redis/v9"
 )
@@ -3725,8 +3725,8 @@ NODE_ENV=production
 GO_ENV=production
 
 # Database
-MONGODB_URI=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/gogolatex?replicaSet=rs0
-MONGODB_DATABASE=gogolatex
+MONGODB_URI=mongodb://mongo1:27017,mongo2:27017,mongo3:27017/gogotex?replicaSet=rs0
+MONGODB_DATABASE=gogotex
 
 # Redis
 REDIS_HOST=redis-master
@@ -3737,12 +3737,12 @@ REDIS_PASSWORD=your_redis_password
 MINIO_ENDPOINT=minio:9000
 MINIO_ACCESS_KEY=your_access_key
 MINIO_SECRET_KEY=your_secret_key
-MINIO_BUCKET=gogolatex
+MINIO_BUCKET=gogotex
 
 # Keycloak
 KEYCLOAK_URL=http://keycloak:8080
-KEYCLOAK_REALM=gogolatex
-KEYCLOAK_CLIENT_ID=gogolatex-client
+KEYCLOAK_REALM=gogotex
+KEYCLOAK_CLIENT_ID=gogotex-client
 KEYCLOAK_CLIENT_SECRET=your_client_secret
 
 # Services
@@ -3756,8 +3756,8 @@ COMPILER_SERVICE_URL=http://compiler-service:3005
 VITE_API_URL=http://localhost:8080
 VITE_WS_URL=ws://localhost:3003
 VITE_KEYCLOAK_URL=http://localhost:8080/auth
-VITE_KEYCLOAK_REALM=gogolatex
-VITE_KEYCLOAK_CLIENT_ID=gogolatex-client
+VITE_KEYCLOAK_REALM=gogotex
+VITE_KEYCLOAK_CLIENT_ID=gogotex-client
 
 # Security
 JWT_SECRET=your_jwt_secret_change_this
@@ -3806,7 +3806,7 @@ services:
       - auth-service
       - document-service
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # Frontend (built static files served by Nginx)
@@ -3815,7 +3815,7 @@ services:
       context: ./frontend
       dockerfile: ../docker/frontend/Dockerfile.prod
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # Go Services (scaled)
@@ -3828,7 +3828,7 @@ services:
     deploy:
       replicas: 2
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   document-service:
@@ -3840,7 +3840,7 @@ services:
     deploy:
       replicas: 3
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   compiler-service:
@@ -3854,7 +3854,7 @@ services:
     volumes:
       - compilation-cache:/var/cache/compilation
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # Node Services (scaled)
@@ -3866,7 +3866,7 @@ services:
     deploy:
       replicas: 3
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   git-service:
@@ -3875,9 +3875,9 @@ services:
       dockerfile: ../../docker/node-services/Dockerfile.prod
     env_file: .env.prod
     volumes:
-      - git-repos:/var/lib/gogolatex/git-repos
+      - git-repos:/var/lib/gogotex/git-repos
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # Databases (production config)
@@ -3887,7 +3887,7 @@ services:
     volumes:
       - mongo1-data:/data/db
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   mongo2:
@@ -3896,7 +3896,7 @@ services:
     volumes:
       - mongo2-data:/data/db
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   mongo3:
@@ -3905,7 +3905,7 @@ services:
     volumes:
       - mongo3-data:/data/db
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # Redis Cluster
@@ -3915,21 +3915,21 @@ services:
     volumes:
       - redis-master-data:/data
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   redis-replica1:
     image: redis:7-alpine
     command: redis-server --replicaof redis-master 6379 --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   redis-replica2:
     image: redis:7-alpine
     command: redis-server --replicaof redis-master 6379 --requirepass ${REDIS_PASSWORD} --masterauth ${REDIS_PASSWORD}
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # MinIO
@@ -3942,7 +3942,7 @@ services:
     volumes:
       - minio-data:/data
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   # Keycloak
@@ -3959,7 +3959,7 @@ services:
     depends_on:
       - postgres
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
   postgres:
@@ -3971,7 +3971,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
-      - gogolatex-network
+      - gogotex-network
     restart: unless-stopped
 
 volumes:
@@ -3985,7 +3985,7 @@ volumes:
   compilation-cache:
 
 networks:
-  gogolatex-network:
+  gogotex-network:
     driver: bridge
 ```
 
@@ -3994,7 +3994,7 @@ networks:
 Create: `DEPLOYMENT.md`
 
 ```markdown
-# GogoLaTeX Deployment Checklist
+# gogotex Deployment Checklist
 
 ## Pre-Deployment
 
@@ -4035,7 +4035,7 @@ Create: `DEPLOYMENT.md`
 
 ```bash
 # Create production network
-docker network create gogolatex-network
+docker network create gogotex-network
 
 # Start databases first
 docker-compose -f docker-compose.prod.yml up -d mongo1 mongo2 mongo3
@@ -4056,7 +4056,7 @@ docker exec -it mongo1 mongosh --eval "rs.initiate({
 })"
 
 # Create database indexes
-docker exec -it mongo1 mongosh gogolatex --eval "
+docker exec -it mongo1 mongosh gogotex --eval "
   db.projects.createIndex({userId: 1, createdAt: -1});
   db.documents.createIndex({projectId: 1, path: 1}, {unique: true});
   db.comments.createIndex({documentId: 1, resolved: 1, isDeleted: 1});
@@ -4177,7 +4177,7 @@ Create: `scripts/optimize-production.sh`
 ```bash
 #!/bin/bash
 
-echo "GogoLaTeX Production Optimization Script"
+echo "gogotex Production Optimization Script"
 echo "=========================================="
 
 # Frontend optimization
@@ -4196,7 +4196,7 @@ cd ../..
 
 # Database optimization
 echo "Creating database indexes..."
-docker exec mongo1 mongosh gogolatex /scripts/create-indexes.js
+docker exec mongo1 mongosh gogotex /scripts/create-indexes.js
 
 # Clear caches
 echo "Clearing Redis cache..."
@@ -4344,4 +4344,4 @@ Expected performance metrics:
 - Follow the deployment checklist for production deployment
 - All code is production-ready with error handling and logging
 
-🎉 **GogoLaTeX is now fully documented and ready for implementation!** 🎉
+🎉 **gogotex is now fully documented and ready for implementation!** 🎉

@@ -38,7 +38,7 @@ Update: `package.json`
 {
   "name": "git-service",
   "version": "1.0.0",
-  "description": "Git integration service for GogoLaTeX",
+  "description": "Git integration service for gogotex",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
@@ -85,12 +85,12 @@ export interface GitConfig {
 }
 
 export const gitConfig: GitConfig = {
-  repoBasePath: process.env.GIT_REPO_PATH || '/var/lib/gogolatex/git-repos',
+  repoBasePath: process.env.GIT_REPO_PATH || '/var/lib/gogotex/git-repos',
   defaultBranch: 'main',
   maxCommitSize: 50 * 1024 * 1024, // 50MB
   allowedFileTypes: ['.tex', '.bib', '.cls', '.sty', '.png', '.jpg', '.pdf'],
-  authorName: process.env.GIT_AUTHOR_NAME || 'GogoLaTeX',
-  authorEmail: process.env.GIT_AUTHOR_EMAIL || 'noreply@gogolatex.local',
+  authorName: process.env.GIT_AUTHOR_NAME || 'gogotex',
+  authorEmail: process.env.GIT_AUTHOR_EMAIL || 'noreply@gogotex.local',
 }
 
 export function getProjectRepoPath(projectId: string): string {
@@ -208,7 +208,7 @@ export class GitManager {
     // Create initial commit
     await fs.writeFile(
       path.join(repoPath, 'README.md'),
-      `# LaTeX Project\n\nCreated with GogoLaTeX\n`
+      `# LaTeX Project\n\nCreated with gogotex\n`
     )
 
     await this.git.add('README.md')
@@ -905,7 +905,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -1128,8 +1128,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yourusername/gogolatex/internal/models"
-	"github.com/yourusername/gogolatex/internal/tracking/repository"
+	"github.com/yourusername/gogotex/internal/models"
+	"github.com/yourusername/gogotex/internal/tracking/repository"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -1243,7 +1243,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -1491,8 +1491,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yourusername/gogolatex/internal/comments/repository"
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/comments/repository"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -1628,8 +1628,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/yourusername/gogolatex/internal/comments/service"
-	"github.com/yourusername/gogolatex/internal/models"
+	"github.com/yourusername/gogotex/internal/comments/service"
+	"github.com/yourusername/gogotex/internal/models"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -2598,15 +2598,15 @@ Update: `docker-compose.yml`
       - "3004:3004"
     environment:
       PORT: 3004
-      GIT_REPO_PATH: /var/lib/gogolatex/git-repos
-      GIT_AUTHOR_NAME: GogoLaTeX
-      GIT_AUTHOR_EMAIL: noreply@gogolatex.local
+      GIT_REPO_PATH: /var/lib/gogotex/git-repos
+      GIT_AUTHOR_NAME: gogotex
+      GIT_AUTHOR_EMAIL: noreply@gogotex.local
     volumes:
-      - git-repos:/var/lib/gogolatex/git-repos
+      - git-repos:/var/lib/gogotex/git-repos
     depends_on:
       - redis
     networks:
-      - gogolatex-network
+      - gogotex-network
 
 volumes:
   git-repos:

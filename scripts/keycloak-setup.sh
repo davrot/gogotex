@@ -4,6 +4,17 @@
 
 set -euo pipefail
 
+# Load environment from support .env if present (makes scripts portable and CI friendly)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SUPPORT_ENV="$ROOT_DIR/gogotex-support-services/.env"
+if [ -f "$SUPPORT_ENV" ]; then
+  # shellcheck disable=SC1091
+  set -o allexport
+  source "$SUPPORT_ENV"
+  set +o allexport
+fi
+
 ADMIN_USER=${KEYCLOAK_ADMIN:-admin}
 ADMIN_PASS=${KEYCLOAK_ADMIN_PASSWORD:-changeme_keycloak}
 REALM=${KEYCLOAK_REALM:-gogotex}
@@ -17,7 +28,9 @@ CANDIDATES=()
 if [ -n "${KC_HOST:-}" ]; then
   CANDIDATES+=("${KC_HOST}")
 fi
-CANDIDATES+=("http://localhost/sso" )
+# Try common host/paths (localhost and container name) including HTTPS variants.
+# Set KC_INSECURE=true to accept self-signed certs (adds curl --insecure)
+CANDIDATES+=("https://localhost:443" "https://localhost/sso" "http://localhost:8080" "http://localhost/sso" "http://keycloak:8080" "http://keycloak:8080/sso")
 
 # Preflight checks
 command -v curl >/dev/null 2>&1 || { echo "ERROR: curl is required" >&2; exit 1; }
@@ -29,27 +42,54 @@ TOKEN=""
 for host in "${CANDIDATES[@]}"; do
   [ -z "$host" ] && continue
   echo -n " - testing $host ... "
-  # Try to request a token (this also implicitly verifies connectivity)
-  TOKEN=$(curl -s -S -X POST \
-    -d "client_id=admin-cli" \
-    -d "username=${ADMIN_USER}" \
-    -d "password=${ADMIN_PASS}" \
-    -d "grant_type=password" \
-    "$host/realms/master/protocol/openid-connect/token" 2>/dev/null || true)
+  # Determine curl TLS options
+  CURL_OPTS=()
+  if [[ "$host" =~ ^https:// ]] || [ "${KC_INSECURE:-false}" = "true" ]; then
+    CURL_OPTS+=(--insecure)
+  fi
 
-  if [ -n "$TOKEN" ] && [ "$(echo "$TOKEN" | jq -r .access_token // empty)" != "" ]; then
-    ACCESS_TOKEN=$(echo "$TOKEN" | jq -r .access_token)
+  # Try a set of token endpoints for this candidate host. This helps handle /sso, /auth, or root mounts.
+  TOKEN=""
+  for token_path in "/realms/master/protocol/openid-connect/token" "/auth/realms/master/protocol/openid-connect/token"; do
+    token_url="$host$token_path"
+    echo -n "    trying token endpoint $token_url ... "
+
+    # Use curl to capture HTTP code and body
+    HTTP_BODY_FILE=$(mktemp)
+    HTTP_CODE=$(curl "${CURL_OPTS[@]}" -sS -X POST \
+      -d "client_id=admin-cli" \
+      -d "username=${ADMIN_USER}" \
+      -d "password=${ADMIN_PASS}" \
+      -d "grant_type=password" \
+      -w "%{http_code}" -o "$HTTP_BODY_FILE" "$token_url" 2>/dev/null || echo "000")
+
+    if [ "$HTTP_CODE" = "200" ]; then
+      TOKEN=$(cat "$HTTP_BODY_FILE")
+      rm -f "$HTTP_BODY_FILE"
+      echo "OK"
+      break
+    else
+      # Print short debug info
+      BODY_SNIPPET=$(head -c 400 "$HTTP_BODY_FILE" | tr -d '\n')
+      rm -f "$HTTP_BODY_FILE"
+      echo "HTTP $HTTP_CODE, body: ${BODY_SNIPPET}"
+    fi
+  done
+
+  if [ -n "$TOKEN" ] && [ "$(echo "$TOKEN" | jq -r '.access_token // empty')" != "" ]; then
+    ACCESS_TOKEN=$(echo "$TOKEN" | jq -r '.access_token')
     FOUND_HOST="$host"
-    echo "OK"
     break
   else
-    echo "no token"
+    echo "    no token from $host"
   fi
 done
 
 if [ -z "$FOUND_HOST" ]; then
   echo "ERROR: Could not connect to Keycloak admin API on any candidate host."
   echo "Tried: ${CANDIDATES[*]}"
+  echo "Common causes: Keycloak not exposed to host, wrong admin password, or admin-cli direct grant disabled."
+  echo "Tip: Try running the script inside the Docker network (e.g. docker exec -it keycloak-keycloak /bin/sh -c \"/scripts/keycloak-setup.sh\") or set KC_HOST to an internal address (http://keycloak-keycloak:8080) and retry."
   exit 2
 fi
 
@@ -62,8 +102,12 @@ echo "✅ Found Keycloak at $KC_HOST"
 admin_call() {
   method=$1; shift
   path=$1; shift
-  data=$1 || true
-  curl -s -S -X "$method" -H "Authorization: Bearer $ACCESS_TOKEN" -H "Content-Type: application/json" "$KC_HOST$path" ${data:+--data "$data"}
+  if [ "$#" -ge 1 ]; then
+    data=$1
+    curl -s -S -X "$method" -H "Authorization: Bearer $ACCESS_TOKEN" -H "Content-Type: application/json" "$KC_HOST$path" --data "$data"
+  else
+    curl -s -S -X "$method" -H "Authorization: Bearer $ACCESS_TOKEN" -H "Content-Type: application/json" "$KC_HOST$path"
+  fi
 }
 
 # Create realm if missing
@@ -83,32 +127,94 @@ client_exists=$(admin_call GET "/admin/realms/$REALM/clients?clientId=$CLIENT_ID
 if [ -n "$client_exists" ] && [ "$client_exists" != "null" ]; then
   echo "Client '$CLIENT_ID' already exists"
 else
-  echo "Creating client '$CLIENT_ID'"
-  client_json=$(jq -n --arg cid "$CLIENT_ID" --argjson bool true '{clientId: $cid, enabled: true, publicClient: false, redirectUris: ["http://localhost:3000/*","http://localhost:5001/*"], protocol: "openid-connect"}')
+  echo "Creating client '$CLIENT_ID' (confidential + direct access grants enabled)"
+  client_json=$(jq -n --arg cid "$CLIENT_ID" '{clientId: $cid, enabled: true, publicClient: false, directAccessGrantsEnabled: true, serviceAccountsEnabled: true, redirectUris: ["http://localhost:3000/*","http://localhost:5001/*"], protocol: "openid-connect"}')
   admin_call POST "/admin/realms/$REALM/clients" "$client_json" >/dev/null
   echo "Client created"
 fi
 
-# Create test user if missing
+# Ensure client has a client secret (confidential client)
+CLIENT_INTERNAL_ID=$(admin_call GET "/admin/realms/$REALM/clients?clientId=$CLIENT_ID" | jq -r '.[0].id')
+if [ -z "$CLIENT_INTERNAL_ID" ] || [ "$CLIENT_INTERNAL_ID" = "null" ]; then
+  echo "ERROR: Cannot find internal client id for $CLIENT_ID" >&2
+else
+  echo "Ensuring client configuration for '$CLIENT_ID' (id: $CLIENT_INTERNAL_ID)"
+  # Ensure direct access grants enabled (allows resource-owner-password credentials)
+  CLIENT_REPR=$(admin_call GET "/admin/realms/$REALM/clients/$CLIENT_INTERNAL_ID")
+  UPDATED_CLIENT_REPR=$(echo "$CLIENT_REPR" | jq '.directAccessGrantsEnabled = true | .publicClient = false | .serviceAccountsEnabled = true')
+  admin_call PUT "/admin/realms/$REALM/clients/$CLIENT_INTERNAL_ID" "$UPDATED_CLIENT_REPR" >/dev/null || true
+  echo "Client configuration updated (directAccessGrantsEnabled = true)"
+
+  echo "Ensuring client secret for '$CLIENT_ID' (id: $CLIENT_INTERNAL_ID)"
+  SECRET_RESP=$(admin_call POST "/admin/realms/$REALM/clients/$CLIENT_INTERNAL_ID/client-secret")
+  CLIENT_SECRET=$(echo "$SECRET_RESP" | jq -r '.value // empty')
+  if [ -n "$CLIENT_SECRET" ]; then
+    echo "Client secret obtained for $CLIENT_ID"
+    # Save secret to file for developer convenience (workspace safe location)
+    SECRET_FILE="./gogotex-support-services/keycloak-service/client-secret_${CLIENT_ID}.txt"
+    mkdir -p "$(dirname "$SECRET_FILE")"
+    echo "$CLIENT_SECRET" > "$SECRET_FILE"
+    chmod 644 "$SECRET_FILE" || true
+    echo "Client secret written to $SECRET_FILE"
+  else
+    echo "Warning: could not obtain a client secret for $CLIENT_ID. Response: $SECRET_RESP" >&2
+  fi
+fi
+
+# Create or ensure test user and set password (always reset for reproducible tests)
 echo "Ensuring test user '$TEST_USER' exists..."
 users=$(admin_call GET "/admin/realms/$REALM/users?username=$TEST_USER")
 if echo "$users" | jq -e '. | length > 0' >/dev/null 2>&1; then
   echo "Test user exists"
+  USER_ID=$(echo "$users" | jq -r '.[0].id')
 else
   echo "Creating test user '$TEST_USER'"
   user_json=$(jq -n --arg username "$TEST_USER" --arg email "$TEST_USER_EMAIL" '{username: $username, email: $email, enabled: true}')
   admin_call POST "/admin/realms/$REALM/users" "$user_json" >/dev/null
   USER_ID=$(admin_call GET "/admin/realms/$REALM/users?username=$TEST_USER" | jq -r '.[0].id')
+  echo "Test user created (id: $USER_ID)"
+fi
 
-  if [ -z "$TEST_USER_PASSWORD" ]; then
-    # Generate a reasonably strong password if not provided
-    TEST_USER_PASSWORD=$(openssl rand -base64 12 || echo "Test123!")
-    echo "Generated password for $TEST_USER: $TEST_USER_PASSWORD"
+# Decide on password: env or generated
+if [ -z "${TEST_USER_PASSWORD:-}" ]; then
+  TEST_USER_PASSWORD=$(openssl rand -base64 12 || echo "Test123!")
+  echo "Generated password for $TEST_USER: $TEST_USER_PASSWORD"
+else
+  echo "Using provided TEST_USER_PASSWORD for $TEST_USER"
+fi
+
+# Set/reset the user's password
+cred_json=$(jq -n --arg val "$TEST_USER_PASSWORD" '{type: "password", temporary: false, value: $val}')
+admin_call PUT "/admin/realms/$REALM/users/$USER_ID/reset-password" "$cred_json" >/dev/null
+echo "Test user password set/reset"
+
+# Ensure user is fully configured: mark emailVerified true and clear required actions
+update_json=$(jq -n --argjson enabled true --arg emailVerified true '{enabled: $enabled, emailVerified: $emailVerified, requiredActions: []}')
+admin_call PUT "/admin/realms/$REALM/users/$USER_ID" "$update_json" >/dev/null
+echo "Test user marked as emailVerified and required actions cleared"
+
+# Save password to a file for automation (dev convenience)
+USER_PASS_FILE="./gogotex-support-services/keycloak-service/testuser_password.txt"
+mkdir -p "$(dirname "$USER_PASS_FILE")"
+echo "$TEST_USER_PASSWORD" > "$USER_PASS_FILE"
+chmod 644 "$USER_PASS_FILE" || true
+echo "Test user password written to $USER_PASS_FILE"
+
+# Quick verification: attempt to exchange user credentials for token using the created client
+if [ -n "${CLIENT_SECRET:-}" ]; then
+  echo "Verifying test user can obtain a token using client id '$CLIENT_ID'..."
+  TOKEN_TEST_RESP=$(curl ${KC_INSECURE:+--insecure} -sS -X POST -d "client_id=$CLIENT_ID" -d "client_secret=$CLIENT_SECRET" -d "username=$TEST_USER" -d "password=$TEST_USER_PASSWORD" -d "grant_type=password" "$KC_HOST/realms/$REALM/protocol/openid-connect/token" 2>/dev/null || true)
+  if [ -n "$TOKEN_TEST_RESP" ] && [ "$(echo "$TOKEN_TEST_RESP" | jq -r '.access_token // empty' 2>/dev/null)" != "" ]; then
+    echo "✅ Test user login succeeded (access token received)"
+    # Print short token info
+    echo "Access token (short): $(echo "$TOKEN_TEST_RESP" | jq -r '.access_token' | cut -c1-60)..."
+  else
+    echo "⚠️ Test user login failed using client secret. Response:"
+    echo "$TOKEN_TEST_RESP" | sed -n '1,20p'
+    echo "You may need to enable direct access grants for the client or use a different client configuration."
   fi
-
-  cred_json=$(jq -n --arg val "$TEST_USER_PASSWORD" '{type: "password", temporary: false, value: $val}')
-  admin_call PUT "/admin/realms/$REALM/users/$USER_ID/reset-password" "$cred_json" >/dev/null
-  echo "Test user created with configured password"
+else
+  echo "Skipped test user login verification: no client secret available for $CLIENT_ID"
 fi
 
 echo "✅ Keycloak setup finished (realm: $REALM, test user: $TEST_USER)"
