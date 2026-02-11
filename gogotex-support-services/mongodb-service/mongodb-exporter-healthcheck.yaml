@@ -3,6 +3,7 @@ services:
     image: curlimages/curl:latest
     container_name: mongodb-exporter-healthcheck
     hostname: mongodb-exporter-healthcheck
+    restart: unless-stopped
 
     networks:
       - tex-network

@@ -3,7 +3,6 @@ services:
 ############
 # Keycloak #
 ############
-
   keycloak-postgres:
     extends:
       file: ./keycloak-service/keycloak-postgres.yaml
@@ -51,7 +50,6 @@ services:
 #########
 # REDIS #
 #########
-
   redis-redis:
     extends:
       file: ./redis-service/redis.yaml
@@ -83,7 +81,6 @@ services:
 #########
 # MINIO #
 #########
-
   minio-minio:
     extends:
       file: ./minio-service/minio.yaml
@@ -92,7 +89,6 @@ services:
 ###########
 # GRAFANA #
 ###########
-
   grafana-prometheus:
     extends:
       file: ./grafana-service/prometheus.yaml
@@ -113,11 +109,22 @@ services:
       grafana-prometheus:
         condition: service_healthy
 
-#  nginx:
-#    extends:
-#      file: ./nginx/compose.yaml
-#      service: nginx
-
+#########
+# nginx #
+#########
+  nginx-nginx:
+    extends:
+      file: ./nginx-service/nginx.yaml
+      service: nginx-nginx
+    depends_on:
+      grafana-grafana:
+        condition: service_healthy
+      keycloak-keycloak:
+        condition: service_healthy
+      mongodb-express:
+        condition: service_healthy
+      redis-commander:
+        condition: service_healthy
 
 networks:
   tex-network:

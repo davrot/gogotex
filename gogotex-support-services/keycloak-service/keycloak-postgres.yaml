@@ -3,6 +3,7 @@ services:
     image: postgres:18
     container_name: keycloak-postgres
     hostname: keycloak-postgres
+    restart: unless-stopped
 
     environment:
       POSTGRES_DB: keycloak

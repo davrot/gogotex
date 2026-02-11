@@ -3,7 +3,8 @@ services:
     image: oliver006/redis_exporter:latest
     container_name: redis-exporter
     hostname: redis-exporter
-    restart: always
+    restart: unless-stopped
+
     command:
       - '--redis.addr=redis-redis:6379'
 

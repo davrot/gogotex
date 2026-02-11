@@ -1,0 +1,1 @@
+docker exec nginx-nginx nginx -s reload

@@ -3,7 +3,7 @@ services:
     image: bitnami/mongodb-exporter:latest
     container_name: mongodb-exporter
     hostname: mongodb-exporter
-    restart: always
+    restart: unless-stopped
 
     environment:
       - MONGODB_URI=mongodb://mongodb-mongodb:27017

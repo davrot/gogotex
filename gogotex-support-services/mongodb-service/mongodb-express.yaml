@@ -3,7 +3,7 @@ services:
     image: mongo-express:latest
     container_name: mongodb-express
     hostname: mongodb-express
-    restart: always
+    restart: unless-stopped
 
     environment:
       - ME_CONFIG_MONGODB_URL=mongodb://mongodb-mongodb:27017/?replicaSet=gogotex
@@ -22,9 +22,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-    profiles:
-      - debug
 
 networks:
   tex-network:

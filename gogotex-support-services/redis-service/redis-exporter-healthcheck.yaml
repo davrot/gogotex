@@ -3,6 +3,8 @@ services:
     image: curlimages/curl:latest
     container_name: redis-exporter-healthcheck
     hostname: redis-exporter-healthcheck
+    restart: unless-stopped
+
     networks:
       - tex-network
 

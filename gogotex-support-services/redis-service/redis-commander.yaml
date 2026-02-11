@@ -3,7 +3,7 @@ services:
     image: rediscommander/redis-commander:latest
     container_name: redis-commander
     hostname: redis-commander
-    restart: always
+    restart: unless-stopped
 
     environment:
       - REDIS_HOSTS=local:redis-redis:6379
@@ -12,9 +12,6 @@ services:
 
     networks:
       - tex-network
-
-    profiles:
-      - debug
 
 networks:
   tex-network:
