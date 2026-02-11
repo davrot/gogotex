@@ -1,0 +1,28 @@
+services:
+  redis-redis:
+    image: "redis:8.4-alpine"
+    container_name: redis-redis
+    hostname: redis-redis
+    restart: always
+    command: --save 60 1 --loglevel warning
+    volumes:
+      - ./data:/data
+      - ./backup:/backup
+
+    networks:
+      - tex-network
+
+    environment:
+      REDIS_AOF_PERSISTENCE: "true"
+
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 3s
+
+networks:
+  tex-network:
+    external: true
+

@@ -1,0 +1,21 @@
+services:
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    hostname: redis-commander
+    restart: always
+
+    environment:
+      - REDIS_HOSTS=local:redis-redis:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=${REDIS_COMMANDER_PASSWORD}
+
+    networks:
+      - tex-network
+
+    profiles:
+      - debug
+
+networks:
+  tex-network:
+    external: true

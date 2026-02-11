@@ -1,0 +1,94 @@
+services:
+
+############
+# Keycloak #
+############
+
+  keycloak-postgres:
+    extends:
+      file: ./keycloak-service/keycloak-postgres.yaml
+      service: keycloak-postgres
+
+  keycloak-keycloak:
+    extends:
+      file: ./keycloak-service/keycloak.yaml
+      service: keycloak-keycloak
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+
+###########
+# MONGODB #
+###########
+
+
+  mongodb-mongodb:
+    extends:
+      file: ./mongodb-service/mongodb.yaml
+      service: mongodb-mongodb
+
+  mongodb-express:
+    extends:
+      file: ./mongodb-service/mongodb-express.yaml
+      service: mongodb-express
+    depends_on:
+      mongodb-mongodb:
+        condition: service_healthy
+
+#########
+# REDIS #
+#########
+
+  redis-redis:
+    extends:
+      file: ./redis-service/redis.yaml
+      service: redis-redis
+
+  redis-commander:
+    extends:
+      file: ./redis-service/redis-commander.yaml
+      service: redis-commander
+    depends_on:
+      redis-redis:
+        condition: service_healthy
+
+#########
+# MINIO #
+#########
+
+  minio-minio:
+    extends:
+      file: ./minio-service/minio.yaml
+      service: minio-minio
+
+###########
+# GRAFANA #
+###########
+
+  grafana-prometheus:
+    extends:
+      file: ./grafana-service/prometheus.yaml
+      service: grafana-prometheus
+
+
+#  nginx:
+#    extends:
+#      file: ./nginx/compose.yaml
+#      service: nginx
+
+#  yjs-server:
+#    extends:
+#      file: ./yjs-server/compose.yaml
+#      service: yjs-server
+
+
+#  grafana:
+#    extends:
+#      file: ./grafana/compose.yaml
+#      service: grafana
+
+
+networks:
+  tex-network:
+    external: true
+

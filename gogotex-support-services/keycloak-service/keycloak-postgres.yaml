@@ -1,0 +1,30 @@
+services:
+  keycloak-postgres:
+    image: postgres:18
+    container_name: keycloak-postgres
+    hostname: keycloak-postgres
+
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    # Postgres 18+ expects a single mount at /var/lib/postgresql so the image
+    # can manage major-version-specific subdirectories (see docker-library/postgres PR#1259)
+    volumes:
+      - ./data:/var/lib/postgresql
+      - ./backup:/backup
+
+    networks:
+      - tex-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  tex-network:
+    external: true

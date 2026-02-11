@@ -1,0 +1,25 @@
+services:
+  yjs-server:
+    build: .
+    container_name: yjs-server
+    hostname: yjs-server
+    restart: always
+    ports:
+      - "4444:1234" 
+    environment:
+      - MONGODB_URI=mongodb://mongodb-mongodb:27017/gogotex?replicaSet=gogotex
+      - REDIS_URL=redis://redis-redis:6379
+      - WS_PORT=1234
+      - NODE_ENV=production
+      - REDIS_CACHE_ENABLED=true
+      - REDIS_CACHE_TTL=3600
+      - MONGODB_FLUSH_SIZE=100
+      - MONGODB_MULTIPLE_COLLECTIONS=true
+    networks:
+      - tex-network
+    volumes:
+      - ./logs:/app/logs
+
+networks:
+  tex-network:
+    external: true

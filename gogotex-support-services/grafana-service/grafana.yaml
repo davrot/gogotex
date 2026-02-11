@@ -1,0 +1,19 @@
+services:
+  grafana-grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - ./data:/var/lib/grafana
+      - ./prometheus/config:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - tex-network
+    depends_on:
+      - prometheus
+
+networks:
+  latex-collaborative-editor_app-network:
+    external: true

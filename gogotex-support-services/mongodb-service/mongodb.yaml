@@ -1,0 +1,31 @@
+services:
+  mongodb-mongodb:
+    image: "mongo:8.0"
+    container_name: mongodb-mongodb
+    hostname: mongodb-mongodb
+    restart: always
+
+    command: "--replSet gogotex"
+
+    volumes:
+      - ./data_db:/data/db
+      - ./data_configdb:/data/configdb
+      - ./backup:/backup
+      # - ./mongo-init:/docker-entrypoint-initdb.d:ro
+      # - /var/run/docker.sock:/var/run/docker.sock
+
+    networks:
+      - tex-network
+
+    environment:
+      - MONGO_INITDB_DATABASE=gogotex
+
+    healthcheck:
+      test: "mongosh --quiet --eval 'rs.hello().setName ? rs.hello().setName : rs.initiate({_id: \"gogotex\",members:[{_id: 0, host:\"mongodb-mongodb:27017\"}]})'"
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+networks:
+  tex-network:
+    external: true
