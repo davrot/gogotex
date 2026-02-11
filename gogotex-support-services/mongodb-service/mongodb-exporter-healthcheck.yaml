@@ -1,0 +1,22 @@
+services:
+  mongodb-exporter-healthcheck:
+    image: curlimages/curl:latest
+    container_name: mongodb-exporter-healthcheck
+    hostname: mongodb-exporter-healthcheck
+
+    networks:
+      - tex-network
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsI --connect-timeout 10 http://mongodb-exporter:9216/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    command: sleep infinity
+
+networks:
+  tex-network:
+    external: true
+

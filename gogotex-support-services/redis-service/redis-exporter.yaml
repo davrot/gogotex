@@ -1,0 +1,16 @@
+services:
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis-exporter
+    hostname: redis-exporter
+    restart: always
+    command:
+      - '--redis.addr=redis-redis:6379'
+
+    networks:
+      - tex-network
+
+networks:
+  tex-network:
+    external: true
+

@@ -2,18 +2,25 @@ services:
   grafana-grafana:
     image: grafana/grafana:latest
     container_name: grafana-grafana
+    hostname: grafana-grafana
+
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     volumes:
-      - ./data:/var/lib/grafana
-      - ./prometheus/config:/etc/grafana/provisioning:ro
+      - ./data-grafana:/var/lib/grafana
+      - ./config-prometheus:/etc/grafana/provisioning:ro
     ports:
       - "3001:3000"
     networks:
       - tex-network
-    depends_on:
-      - prometheus
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
-  latex-collaborative-editor_app-network:
+  tex-network:
     external: true
