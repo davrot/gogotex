@@ -11,8 +11,7 @@ services:
       - ./data_db:/data/db
       - ./data_configdb:/data/configdb
       - ./backup:/backup
-      # - ./mongo-init:/docker-entrypoint-initdb.d:ro
-      # - /var/run/docker.sock:/var/run/docker.sock
+      - ./mongodb-init.js:/docker-entrypoint-initdb.d/init.js:ro
 
     networks:
       - tex-network

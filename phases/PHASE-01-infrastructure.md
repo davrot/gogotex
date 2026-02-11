@@ -16,26 +16,27 @@
 
 ## Task 1: Project Structure Setup (30 min)
 
-### 1.1 Create Directory Structure
+### 1.1 Verify Repository Layout
+
+The repository has been organized into two main areas:
+- `gogotex-support-services/` — infrastructure and support services (Keycloak, MinIO, Prometheus, Grafana, nginx, DBs)
+- `gogotex-services/` — application and realtime services (yjs-server, node services, go services)
+
+Create any missing local helper scripts and directories used by the infra:
 
 ```bash
 cd /home/davrot/gogotex
-mkdir -p latex-collaborative-editor/{backend,frontend,config,docker,scripts}
-mkdir -p latex-collaborative-editor/backend/{go-services,node-services}
-mkdir -p latex-collaborative-editor/backend/go-services/{cmd,internal,pkg}
-mkdir -p latex-collaborative-editor/backend/go-services/cmd/{auth,document,compiler}
-mkdir -p latex-collaborative-editor/backend/go-services/internal/{auth,database,models,config}
-mkdir -p latex-collaborative-editor/backend/go-services/pkg/{middleware,logger,utils}
-mkdir -p latex-collaborative-editor/backend/node-services/{realtime-server,git-service}
-mkdir -p latex-collaborative-editor/frontend/{src,public}
-mkdir -p latex-collaborative-editor/config/{nginx,keycloak,mongodb,redis,minio}
-mkdir -p latex-collaborative-editor/docker/{go-services,node-services,latex-compiler,nginx}
-mkdir -p latex-collaborative-editor/scripts/{backup,monitoring}
+# Operational scripts
+mkdir -p scripts
+# Service manifests and support stack
+mkdir -p gogotex-support-services/config gogotex-support-services/scripts
+# Application services (if needed)
+mkdir -p gogotex-services
 ```
 
 **Verification**:
 ```bash
-tree -L 3 latex-collaborative-editor/
+ls -la gogotex-support-services gogotex-services scripts
 ```
 
 ---
@@ -44,7 +45,9 @@ tree -L 3 latex-collaborative-editor/
 
 ### 2.1 Create Main Docker Compose File
 
-Create: `latex-collaborative-editor/docker-compose.yml`
+Compose: `gogotex-support-services/compose.yaml` (support/infrastructure stack)
+
+> Note: service-specific compose files can be found under `gogotex-services/` for application components.
 
 ```yaml
 version: '3.8'
@@ -496,11 +499,11 @@ docker-compose config
 
 ### 3.1 Create .env File
 
-Create: `latex-collaborative-editor/.env`
+Create: `gogotex-support-services/.env`
 
 ```env
-# GoGoLaTeX Environment Variables
-# Copy this file to .env and customize
+# GoGoLaTeX Environment Variables for support stack
+# Copy this file to .env inside gogotex-support-services and customize
 
 # MongoDB
 MONGODB_ROOT_PASSWORD=secure_mongodb_password_change_me
@@ -546,7 +549,7 @@ RATE_LIMIT_UPLOAD=100
 ### 3.2 Create .env.example
 
 ```bash
-cp latex-collaborative-editor/.env latex-collaborative-editor/.env.example
+cp gogotex-support-services/.env gogotex-support-services/.env.example
 # Replace all passwords with placeholders in .env.example
 ```
 
@@ -1075,11 +1078,17 @@ curl http://localhost/health
 
 ### 9.1 Create GoGoLaTeX Realm
 
-1. Open Keycloak admin console: http://localhost:8080
-2. Login with admin/changeme_keycloak
-3. Hover over "master" realm dropdown → Click "Create Realm"
-4. Enter realm name: `gogolatex`
-5. Click "Create"
+You can perform the steps manually via the Keycloak admin console or run the provided helper script to automate realm, client, and test user creation.
+
+1. Open Keycloak admin console (if exposed): http://localhost:8080
+2. Or run the helper script (recommended):
+
+```bash
+# If Keycloak is exposed on host
+KC_HOST=http://localhost:8080 ./scripts/keycloak-setup.sh
+```
+
+3. Login with admin credentials or let the script create the realm `gogolatex` and the test user for you.
 
 ### 9.2 Configure Realm Settings
 
