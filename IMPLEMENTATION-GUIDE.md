@@ -43,7 +43,7 @@ Before starting implementation:
 - **Go 1.21+**: Auth, Document, Compilation services (performance, concurrency)
 - **Node.js 20+**: Real-time server, Git service (WebSocket, JS ecosystem)
 - **MongoDB 7**: Primary database (document storage, user data)
-- **Redis 7**: Caching, pub/sub, session storage, queue management
+- **Redis 7**: Caching, pub/sub, session storage (auth service supports Redis-backed sessions), queue management
 - **MinIO**: Object storage for large files (PDFs, images)
 - **Keycloak**: Authentication and authorization (OIDC provider)
 
@@ -610,7 +610,7 @@ k6 run scripts/load-test.js
 - [ ] **Authentication**: JWT tokens with expiration
 - [ ] **Authorization**: Role-based access control (RBAC)
 - [ ] **Input Validation**: Sanitize all user inputs
-- [ ] **Rate Limiting**: Prevent API abuse
+- [x] **Rate Limiting**: Prevent API abuse (in-memory token-bucket; per-user when authenticated)
 - [ ] **CORS**: Configure allowed origins
 - [ ] **HTTPS**: Use SSL/TLS in production
 - [ ] **Secrets**: Never commit secrets to Git

@@ -96,14 +96,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	u, err := h.usersSvc.UpsertFromClaims(c.Request.Context(), claims)
-	if err != nil || u == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "user upsert failed"})
+	if err != nil {
+		log.Printf("user upsert error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user upsert failed", "details": err.Error()})
+		return
+	}
+	if u == nil {
+		log.Printf("user upsert returned nil user (claims missing 'sub')")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user upsert failed", "details": "no user returned from upsert"})
 		return
 	}
 	// create refresh session
 	rft, err := h.sessionsSvc.CreateSession(c.Request.Context(), u.Sub, 7*24*time.Hour)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		log.Printf("failed to create session: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session", "details": err.Error()})
 		return
 	}
 	// create access token
@@ -145,18 +152,81 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"access_token": access, "expires_in": 900})
 }
 
-// Logout invalidates the refresh token
+// Logout invalidates the refresh token and (optionally) blacklists the current access token
 func (h *AuthHandler) Logout(c *gin.Context) {
 	var req struct{ RefreshToken string `json:"refresh_token" binding:"required"` }
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// If the client supplied an Authorization Bearer token, attempt to blacklist it
+	auth := c.GetHeader("Authorization")
+	if auth != "" {
+		var at string
+		if n, _ := fmt.Sscanf(auth, "Bearer %s", &at); n == 1 {
+			if exp, err := parseExpFromJWT(at); err == nil {
+				ttl := time.Until(exp)
+				if ttl > 0 {
+					if err := sessions.BlacklistAccessToken(c.Request.Context(), at, ttl); err != nil {
+						c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to blacklist access token"})
+						return
+					}
+				}
+			}
+		}
+	}
+
 	if err := h.sessionsSvc.DeleteRefresh(c.Request.Context(), req.RefreshToken); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove session"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
+// parseExpFromJWT decodes the JWT payload and returns the `exp` claim as time.Time.
+// This performs payload-only parsing (no signature verification) and is suitable
+// for computing remaining TTLs for blacklisting purposes.
+func parseExpFromJWT(tok string) (time.Time, error) {
+	parts := strings.Split(tok, ".")
+	if len(parts) < 2 {
+		return time.Time{}, fmt.Errorf("invalid token")
+	}
+	payload := parts[1]
+	b, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		// try standard base64 (pad) as a fallback
+		b, err = base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			return time.Time{}, err
+		}
+	}
+	var claims map[string]interface{}
+	if err := json.Unmarshal(b, &claims); err != nil {
+		return time.Time{}, err
+	}
+	v, ok := claims["exp"]
+	if !ok {
+		return time.Time{}, fmt.Errorf("exp claim not present")
+	}
+	// exp may be float64 (json number) or json.Number; handle common cases
+	switch vv := v.(type) {
+	case float64:
+		return time.Unix(int64(vv), 0), nil
+	case int64:
+		return time.Unix(vv, 0), nil
+	case json.Number:
+		i64, err := vv.Int64()
+		if err != nil {
+			f, err2 := vv.Float64()
+			if err2 != nil {
+				return time.Time{}, err
+			}
+			return time.Unix(int64(f), 0), nil
+		}
+		return time.Unix(i64, 0), nil
+	default:
+		return time.Time{}, fmt.Errorf("unsupported exp type %T", v)
+	}
 }
 
 // The functions requestPasswordToken and verifyIDToken are lightweight helpers implemented in the same package file

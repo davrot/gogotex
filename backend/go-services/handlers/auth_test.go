@@ -16,6 +16,8 @@ import (
 	"github.com/gogotex/gogotex/backend/go-services/internal/models"
 	"github.com/gogotex/gogotex/backend/go-services/internal/users"
 	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
+	mr "github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -147,5 +149,52 @@ func TestRequestAuthCodeToken_RetrySucceeds(t *testing.T) {
 	tr, err := requestAuthCodeToken(context.Background(), tokenSrv.URL, "gogotex", "cid", "csecret", "code", "http://cb")
 	assert.NoError(t, err)
 	assert.Equal(t, "ok", tr.AccessToken)
+}
+
+func TestLogout_BlacklistsAccessAndDeletesRefresh(t *testing.T) {
+	// start miniredis and configure package blacklist client
+	m, err := mr.Run()
+	assert.NoError(t, err)
+	defer m.Close()
+	client := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	sessions.SetBlacklistClient(client)
+
+	cfg := &config.Config{}
+	uSvc := users.NewService(&fakeUserRepo{})
+	frepo := &fakeSessionsRepo{}
+	sSvc := sessions.NewService(frepo)
+	h := NewAuthHandler(cfg, uSvc, sSvc)
+
+	// create a refresh session to be deleted
+	rt, err := sSvc.CreateSession(context.Background(), "sub-1", time.Hour)
+	assert.NoError(t, err)
+
+	// craft an access token with exp in the future
+	exp := time.Now().Add(2 * time.Minute).Unix()
+	payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"sub":"sub-1","exp":%d}`, exp)))
+	access := "hdr." + payload + ".sig"
+
+	rp := gin.New()
+	rg := rp.Group("/")
+	h.Register(rg)
+
+	body := fmt.Sprintf(`{"refresh_token":"%s"}`, rt)
+	req := httptest.NewRequest("POST", "/auth/logout", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+access)
+	w := httptest.NewRecorder()
+	rp.ServeHTTP(w, req)
+
+	resp := w.Result()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// refresh session should be deleted
+	sess, err := sSvc.ValidateRefresh(context.Background(), rt)
+	assert.NoError(t, err)
+	assert.Nil(t, sess)
+
+	// access token should be blacklisted in redis
+	exists := m.Exists("blacklist:access:" + access)
+	assert.Equal(t, int64(1), exists)
 }
 

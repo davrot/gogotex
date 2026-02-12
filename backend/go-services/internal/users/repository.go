@@ -35,6 +35,7 @@ func (r *MongoUserRepository) UpsertBySub(ctx context.Context, u *models.User) (
 
 	filter := bson.M{"sub": u.Sub}
 	repl := bson.M{"$set": bson.M{
+		"oidcId":    u.Sub,
 		"email":     u.Email,
 		"name":      u.Name,
 		"updatedAt": u.UpdatedAt,

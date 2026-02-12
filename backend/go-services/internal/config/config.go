@@ -11,18 +11,19 @@ import (
 
 // Config holds application configuration
 type Config struct {
-	Server   ServerConfig
-	MongoDB  MongoDBConfig
-	Redis    RedisConfig
-	Keycloak KeycloakConfig
-	JWT      JWTConfig
+	Server    ServerConfig
+	MongoDB   MongoDBConfig
+	Redis     RedisConfig
+	Keycloak  KeycloakConfig
+	JWT       JWTConfig
+	RateLimit RateLimitConfig
 }
 
 type ServerConfig struct {
-	Port        string
-	Host        string
-	Environment string
-	ReadTimeout time.Duration
+	Port         string
+	Host         string
+	Environment  string
+	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 }
 
@@ -52,6 +53,16 @@ type JWTConfig struct {
 	RefreshTokenTTL time.Duration
 }
 
+// RateLimitConfig controls the global in-memory rate limiter used by the auth service.
+// - RPS: allowed requests per second
+// - Burst: maximum burst tokens
+// - Enabled: whether middleware is enabled
+type RateLimitConfig struct {
+	Enabled bool
+	RPS     float64
+	Burst   int
+}
+
 // LoadConfig loads configuration from environment variables and .env file
 func LoadConfig() (*Config, error) {
 	_ = godotenv.Load("gogotex-support-services/.env")
@@ -65,11 +76,10 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("JWT_ACCESS_TOKEN_TTL", 15)
 	viper.SetDefault("JWT_REFRESH_TOKEN_TTL", 10080)
 
-	cfg := &Config{
-		Server: ServerConfig{
-			Port:        viper.GetString("SERVER_PORT"),
-			Host:        viper.GetString("SERVER_HOST"),
-			Environment: viper.GetString("SERVER_ENVIRONMENT"),
+// Rate limiting defaults
+viper.SetDefault("RATE_LIMIT_ENABLED", true)
+viper.SetDefault("RATE_LIMIT_RPS", 10)
+viper.SetDefault("RATE_LIMIT_BURST", 40)
 			ReadTimeout: 30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
@@ -94,6 +104,11 @@ func LoadConfig() (*Config, error) {
 			Secret:          os.Getenv("JWT_SECRET"),
 			AccessTokenTTL:  time.Duration(viper.GetInt("JWT_ACCESS_TOKEN_TTL")) * time.Minute,
 			RefreshTokenTTL: time.Duration(viper.GetInt("JWT_REFRESH_TOKEN_TTL")) * time.Minute,
+		},
+		RateLimit: RateLimitConfig{
+			Enabled: viper.GetBool("RATE_LIMIT_ENABLED"),
+			RPS:     float64(viper.GetFloat64("RATE_LIMIT_RPS")),
+			Burst:   viper.GetInt("RATE_LIMIT_BURST"),
 		},
 	}
 

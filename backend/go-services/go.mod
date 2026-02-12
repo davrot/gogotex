@@ -13,6 +13,8 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.17.9
+	github.com/redis/go-redis/v9 v9.0.0
+	github.com/alicebob/miniredis/v2 v2.23.0
 )
 
 require (

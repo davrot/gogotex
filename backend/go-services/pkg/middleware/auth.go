@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
 	)
 
 // Token is minimal interface for a verified token that can expose claims
@@ -19,6 +20,7 @@ type Verifier interface {
 }
 
 // AuthMiddleware returns a Gin middleware that verifies Bearer tokens using the provided verifier
+// It also consults the sessions package blacklist (if configured) and rejects blacklisted tokens.
 func AuthMiddleware(ver Verifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
@@ -30,6 +32,15 @@ func AuthMiddleware(ver Verifier) gin.HandlerFunc {
 		var token string
 		if n, _ := fmt.Sscanf(auth, "Bearer %s", &token); n != 1 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid Authorization header"})
+			return
+		}
+
+		// Check blacklist first (fast, optional)
+		if ok, err := sessions.IsAccessTokenBlacklisted(c.Request.Context(), token); err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "blacklist check failed"})
+			return
+		} else if ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "token revoked"})
 			return
 		}
 

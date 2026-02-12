@@ -17,6 +17,7 @@ import (
 	"github.com/gogotex/gogotex/backend/go-services/internal/users"
 	"github.com/gogotex/gogotex/backend/go-services/handlers"
 	"github.com/gogotex/gogotex/backend/go-services/pkg/middleware"
+	"github.com/redis/go-redis/v9"
 )
 
 
@@ -27,8 +28,13 @@ func main() {
 	}
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+// Global middlewares: logging + recovery
+r.Use(gin.Logger(), gin.Recovery())
 
+// Optional global rate limiter (per-user when authenticated, otherwise per-IP)
+if cfg.RateLimit.Enabled {
+	r.Use(middleware.RateLimitMiddleware(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
+}
 	// Basic health endpoint
 	r.GET("/health", func(c *gin.Context) {
 		c.String(http.StatusOK, "healthy")
@@ -73,7 +79,33 @@ func main() {
 	// Connect to MongoDB and initialize user and session services
 	var userSvc *users.Service
 	var sessionsSvc *sessions.Service
-	if cfg.MongoDB.URI != "" {
+
+	// Prefer Redis-based sessions when configured (fast, in-memory)
+	if cfg.Redis.Host != "" {
+		// create Redis client
+		importedRedis := func() *redis.Client {
+			opt := &redis.Options{Addr: cfg.Redis.Host + ":" + cfg.Redis.Port}
+			if cfg.Redis.Password != "" {
+				opt.Password = cfg.Redis.Password
+			}
+			return redis.NewClient(opt)
+		}()
+
+		// validate connection
+		if err := importedRedis.Ping(ctx).Err(); err == nil {
+			// sessions stored in Redis
+			srepo := sessions.NewRedisRepository(importedRedis, "session:")
+			sessionsSvc = sessions.NewService(srepo)
+			// expose Redis client for blacklist checks
+			sessions.SetBlacklistClient(importedRedis)
+			log.Printf("Connected to Redis for session storage: %s:%s", cfg.Redis.Host, cfg.Redis.Port)
+		} else {
+			log.Printf("Warning: failed to connect to Redis (%s:%s): %v", cfg.Redis.Host, cfg.Redis.Port, err)
+		}
+	}
+
+	// Fallback: MongoDB-backed services (users + sessions)
+	if sessionsSvc == nil && cfg.MongoDB.URI != "" {
 		client, err := database.ConnectMongo(ctx, cfg.MongoDB.URI, cfg.MongoDB.Timeout)
 		if err != nil {
 			log.Printf("Warning: failed to connect to MongoDB: %v", err)

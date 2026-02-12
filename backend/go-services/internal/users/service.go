@@ -25,6 +25,7 @@ func (s *Service) UpsertFromClaims(ctx context.Context, claims map[string]interf
 	}
 	u := &models.User{
 		Sub:   sub,
+		OIDCId: sub,
 		Email: email,
 		Name:  name,
 	}

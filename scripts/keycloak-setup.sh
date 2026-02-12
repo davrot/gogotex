@@ -133,6 +133,37 @@ else
   echo "Client created"
 fi
 
+# --- Create a dedicated CI/test client that is allowed to use direct access grants ---
+CI_CLIENT_ID="gogotex-ci"
+echo "Ensuring CI client '$CI_CLIENT_ID' exists (directAccessGrants enabled)..."
+ci_exists=$(admin_call GET "/admin/realms/$REALM/clients?clientId=$CI_CLIENT_ID" | jq '.[0] // empty')
+if [ -n "$ci_exists" ] && [ "$ci_exists" != "null" ]; then
+  echo "CI client '$CI_CLIENT_ID' already exists"
+else
+  echo "Creating CI client '$CI_CLIENT_ID' (confidential + directAccessGrantsEnabled=true)"
+  ci_json=$(jq -n --arg cid "$CI_CLIENT_ID" '{clientId: $cid, enabled: true, publicClient: false, directAccessGrantsEnabled: true, serviceAccountsEnabled: false, standardFlowEnabled: false, protocol: "openid-connect"}')
+  admin_call POST "/admin/realms/$REALM/clients" "$ci_json" >/dev/null
+  echo "CI client created"
+fi
+
+# Ensure CI client has a secret and write it to workspace for CI use (idempotent)
+CI_INTERNAL_ID=$(admin_call GET "/admin/realms/$REALM/clients?clientId=$CI_CLIENT_ID" | jq -r '.[0].id')
+if [ -n "$CI_INTERNAL_ID" ] && [ "$CI_INTERNAL_ID" != "null" ]; then
+  echo "Ensuring client secret for '$CI_CLIENT_ID' (id: $CI_INTERNAL_ID)"
+  CI_SECRET_RESP=$(admin_call POST "/admin/realms/$REALM/clients/$CI_INTERNAL_ID/client-secret") || true
+  CI_CLIENT_SECRET=$(echo "$CI_SECRET_RESP" | jq -r '.value // empty')
+  if [ -n "$CI_CLIENT_SECRET" ]; then
+    SECRET_FILE_CI="./gogotex-support-services/keycloak-service/client-secret_${CI_CLIENT_ID}.txt"
+    echo "$CI_CLIENT_SECRET" > "$SECRET_FILE_CI"
+    chmod 644 "$SECRET_FILE_CI" || true
+    echo "CI client secret written to $SECRET_FILE_CI"
+  else
+    echo "CI client secret already present or could not be created (response: $CI_SECRET_RESP)" || true
+  fi
+else
+  echo "Warning: could not determine internal id for $CI_CLIENT_ID" >&2
+fi
+
 # Ensure client has a client secret (confidential client)
 CLIENT_INTERNAL_ID=$(admin_call GET "/admin/realms/$REALM/clients?clientId=$CLIENT_ID" | jq -r '.[0].id')
 if [ -z "$CLIENT_INTERNAL_ID" ] || [ "$CLIENT_INTERNAL_ID" = "null" ]; then

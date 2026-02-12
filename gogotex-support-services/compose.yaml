@@ -154,9 +154,12 @@ services:
     ports:
       - "127.0.0.1:8082:80"   # Traefik HTTP on host:8082 (does not conflict with nginx)
       - "127.0.0.1:8083:8080" # Traefik dashboard (insecure)
+      - "127.0.0.1:8443:443"  # Traefik HTTPS on host:8443 (serves TLS using provided cert)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./nginx-service/config-nginx/ssl:/etc/traefik/ssl:ro
     networks:
       - tex-network
 

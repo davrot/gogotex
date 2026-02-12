@@ -35,7 +35,8 @@ if (!db.getCollectionNames().includes('sessions')) {
 }
 db.sessions.createIndex({ 'expiresAt': 1 }, { expireAfterSeconds: 0 });
 db.sessions.createIndex({ 'userId': 1 });
-db.sessions.createIndex({ 'token': 1 }, { unique: true });
+// Index the refresh token field (code uses 'refreshToken')
+db.sessions.createIndex({ 'refreshToken': 1 }, { unique: true });
 
 // Create activity_logs collection with indexes
 if (!db.getCollectionNames().includes('activity_logs')) {
