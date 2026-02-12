@@ -153,12 +153,25 @@ else
 fi
 
 # Determine how to reach the auth service for health/metrics checks.
-# - If we reused a running container, call the host-mapped port (localhost:8081)
-# - Otherwise, use in-network container name
+# Strategy:
+# 1) If reusing a long-running `gogotex-auth` -> use host-mapped localhost:8081.
+# 2) Otherwise prefer the container's network IP (avoids DNS timing issues).
+# 3) Fallback to container name when IP is not available.
 if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
   AUTH_HOST="localhost:8081"
 else
-  AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
+  # try to resolve container ID and inspect its network IP on $NET
+  CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
+  if [ -n "$CID" ]; then
+    CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+    if [ -n "$CONTAINER_IP" ]; then
+      AUTH_HOST="$CONTAINER_IP:8081"
+    else
+      AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
+    fi
+  else
+    AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
+  fi
 fi
 
 # Wait for auth service to be healthy (HTTP /health)
