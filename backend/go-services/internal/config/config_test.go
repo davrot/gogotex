@@ -15,7 +15,8 @@ func TestLoadConfig(t *testing.T) {
 	os.Setenv("RATE_LIMIT_ENABLED", "true")
 	os.Setenv("RATE_LIMIT_RPS", "7")
 	os.Setenv("RATE_LIMIT_BURST", "12")
-
+	os.Setenv("RATE_LIMIT_USE_REDIS", "true")
+	os.Setenv("RATE_LIMIT_WINDOW_SECONDS", "1")
 	cfg, err := LoadConfig()
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)

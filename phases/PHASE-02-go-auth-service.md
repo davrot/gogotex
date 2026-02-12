@@ -1744,7 +1744,7 @@ go test ./... -v
 ### Next high‑priority tasks
 1. Stabilize auth‑code E2E (increase retries, add diagnostics, ensure redirect_uri consistency).
 2. Implement refresh & logout server logic + unit tests.
-3. Add Redis usage (sessions/blacklist) and make rate‑limit middleware configurable via env (`RATE_LIMIT_ENABLED`, `RATE_LIMIT_RPS`, `RATE_LIMIT_BURST`).
+3. Add Redis usage (sessions/blacklist) and add Redis-backed rate limiter option (`RATE_LIMIT_USE_REDIS`, `RATE_LIMIT_WINDOW_SECONDS`).
 4. Add logger package and Swagger generation.
 
 (If you want, I can implement the highest‑priority item now — tell me which one to pick.)

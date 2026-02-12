@@ -58,9 +58,11 @@ type JWTConfig struct {
 // - Burst: maximum burst tokens
 // - Enabled: whether middleware is enabled
 type RateLimitConfig struct {
-	Enabled bool
-	RPS     float64
-	Burst   int
+	Enabled       bool
+	RPS           float64
+	Burst         int
+	UseRedis      bool
+	WindowSeconds int // window size in seconds for Redis fixed-window counter
 }
 
 // LoadConfig loads configuration from environment variables and .env file
@@ -80,6 +82,9 @@ func LoadConfig() (*Config, error) {
 viper.SetDefault("RATE_LIMIT_ENABLED", true)
 viper.SetDefault("RATE_LIMIT_RPS", 10)
 viper.SetDefault("RATE_LIMIT_BURST", 40)
+// Redis-backed rate limiter defaults
+viper.SetDefault("RATE_LIMIT_USE_REDIS", false)
+viper.SetDefault("RATE_LIMIT_WINDOW_SECONDS", 1)
 			ReadTimeout: 30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
@@ -103,9 +108,11 @@ viper.SetDefault("RATE_LIMIT_BURST", 40)
 		JWT: JWTConfig{
 			Secret:          os.Getenv("JWT_SECRET"),
 			AccessTokenTTL:  time.Duration(viper.GetInt("JWT_ACCESS_TOKEN_TTL")) * time.Minute,
-			RefreshTokenTTL: time.Duration(viper.GetInt("JWT_REFRESH_TOKEN_TTL")) * time.Minute,
-		},
-		RateLimit: RateLimitConfig{
+			RefreshTo      viper.GetBool("RATE_LIMIT_ENABLED"),
+			RPS:           float64(viper.GetFloat64("RATE_LIMIT_RPS")),
+			Burst:         viper.GetInt("RATE_LIMIT_BURST"),
+			UseRedis:      viper.GetBool("RATE_LIMIT_USE_REDIS"),
+			WindowSeconds: viper.GetInt("RATE_LIMIT_WINDOW_SECONDS
 			Enabled: viper.GetBool("RATE_LIMIT_ENABLED"),
 			RPS:     float64(viper.GetFloat64("RATE_LIMIT_RPS")),
 			Burst:   viper.GetInt("RATE_LIMIT_BURST"),

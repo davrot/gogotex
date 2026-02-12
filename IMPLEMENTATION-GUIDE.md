@@ -610,7 +610,7 @@ k6 run scripts/load-test.js
 - [ ] **Authentication**: JWT tokens with expiration
 - [ ] **Authorization**: Role-based access control (RBAC)
 - [ ] **Input Validation**: Sanitize all user inputs
-- [x] **Rate Limiting**: Prevent API abuse (in-memory token-bucket; per-user when authenticated)
+- [x] **Rate Limiting**: Prevent API abuse (in-memory token-bucket; per-user when authenticated) — optional Redis-backed distributed limiter available via `RATE_LIMIT_USE_REDIS`
 - [ ] **CORS**: Configure allowed origins
 - [ ] **HTTPS**: Use SSL/TLS in production
 - [ ] **Secrets**: Never commit secrets to Git

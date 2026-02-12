@@ -33,7 +33,13 @@ r.Use(gin.Logger(), gin.Recovery())
 
 // Optional global rate limiter (per-user when authenticated, otherwise per-IP)
 if cfg.RateLimit.Enabled {
-	r.Use(middleware.RateLimitMiddleware(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
+	// use Redis-backed limiter when configured and Redis client is available
+	if cfg.RateLimit.UseRedis && importedRedis != nil {
+		win := time.Duration(cfg.RateLimit.WindowSeconds) * time.Second
+		r.Use(middleware.RedisRateLimitMiddleware(importedRedis, cfg.RateLimit.RPS, cfg.RateLimit.Burst, win))
+	} else {
+		r.Use(middleware.RateLimitMiddleware(cfg.RateLimit.RPS, cfg.RateLimit.Burst))
+	}
 }
 	// Basic health endpoint
 	r.GET("/health", func(c *gin.Context) {
@@ -81,28 +87,23 @@ if cfg.RateLimit.Enabled {
 	var sessionsSvc *sessions.Service
 
 	// Prefer Redis-based sessions when configured (fast, in-memory)
-	if cfg.Redis.Host != "" {
-		// create Redis client
-		importedRedis := func() *redis.Client {
-			opt := &redis.Options{Addr: cfg.Redis.Host + ":" + cfg.Redis.Port}
-			if cfg.Redis.Password != "" {
-				opt.Password = cfg.Redis.Password
-			}
-			return redis.NewClient(opt)
-		}()
+	var importedRedis *redis.Client
+if cfg.Redis.Host != "" {
+	// create Redis client
+	importedRedis = redis.NewClient(&redis.Options{Addr: cfg.Redis.Host + ":" + cfg.Redis.Port, Password: cfg.Redis.Password})
 
-		// validate connection
-		if err := importedRedis.Ping(ctx).Err(); err == nil {
-			// sessions stored in Redis
-			srepo := sessions.NewRedisRepository(importedRedis, "session:")
-			sessionsSvc = sessions.NewService(srepo)
-			// expose Redis client for blacklist checks
-			sessions.SetBlacklistClient(importedRedis)
-			log.Printf("Connected to Redis for session storage: %s:%s", cfg.Redis.Host, cfg.Redis.Port)
-		} else {
-			log.Printf("Warning: failed to connect to Redis (%s:%s): %v", cfg.Redis.Host, cfg.Redis.Port, err)
-		}
+	// validate connection
+	if err := importedRedis.Ping(ctx).Err(); err == nil {
+		// sessions stored in Redis
+		srepo := sessions.NewRedisRepository(importedRedis, "session:")
+		sessionsSvc = sessions.NewService(srepo)
+		// expose Redis client for blacklist checks
+		sessions.SetBlacklistClient(importedRedis)
+		log.Printf("Connected to Redis for session storage: %s:%s", cfg.Redis.Host, cfg.Redis.Port)
+	} else {
+		log.Printf("Warning: failed to connect to Redis (%s:%s): %v", cfg.Redis.Host, cfg.Redis.Port, err)
 	}
+}
 
 	// Fallback: MongoDB-backed services (users + sessions)
 	if sessionsSvc == nil && cfg.MongoDB.URI != "" {
