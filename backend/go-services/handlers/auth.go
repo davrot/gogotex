@@ -1,0 +1,267 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gogotex/gogotex/backend/go-services/internal/config"
+	"github.com/gogotex/gogotex/backend/go-services/internal/oidc"
+	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
+	"github.com/gogotex/gogotex/backend/go-services/internal/tokens"
+	"github.com/gogotex/gogotex/backend/go-services/internal/users"
+)
+
+// LoginRequest used for password-mode login (dev/testing)
+type LoginRequest struct {
+	Mode        string `json:"mode" binding:"required"` // "password" | "auth_code"
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	Code        string `json:"code"`         // authorization code
+	RedirectURI string `json:"redirect_uri"` // redirect uri used in auth code flow
+}
+
+// AuthHandler holds dependencies
+type AuthHandler struct {
+	cfg        *config.Config
+	usersSvc   *users.Service
+	sessionsSvc *sessions.Service
+}
+
+func NewAuthHandler(cfg *config.Config, u *users.Service, s *sessions.Service) *AuthHandler {
+	return &AuthHandler{cfg: cfg, usersSvc: u, sessionsSvc: s}
+}
+
+// Register routes under /auth
+func (h *AuthHandler) Register(rg *gin.RouterGroup) {
+	a := rg.Group("/auth")
+	a.POST("/login", h.Login)
+	a.POST("/refresh", h.Refresh)
+	a.POST("/logout", h.Logout)
+}
+
+// Login implements a minimal login: password grant (dev/testing) and authorization-code exchange
+func (h *AuthHandler) Login(c *gin.Context) {
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Mode != "password" && req.Mode != "auth_code" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported mode"})
+		return
+	}
+	host := h.cfg.Keycloak.URL
+	realm := h.cfg.Keycloak.Realm
+	if host == "" || realm == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Keycloak not configured"})
+		return
+	}
+
+	var tokenResp *tokenResponse
+	var err error
+	if req.Mode == "password" {
+		// password grant
+		tokenResp, err = requestPasswordToken(c.Request.Context(), host, realm, h.cfg.Keycloak.ClientID, h.cfg.Keycloak.ClientSecret, req.Username, req.Password, h.cfg)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed", "details": err.Error()})
+			return
+		}
+	} else {
+		// authorization code exchange
+		if req.Code == "" || req.RedirectURI == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "code and redirect_uri required for auth_code mode"})
+			return
+		}
+		tokenResp, err = requestAuthCodeToken(c.Request.Context(), host, realm, h.cfg.Keycloak.ClientID, h.cfg.Keycloak.ClientSecret, req.Code, req.RedirectURI)
+		if err != nil {
+			// log token exchange error for easier debugging in CI/integration runs
+			log.Printf("auth-code token exchange error: %v", err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed", "details": err.Error()})
+			return
+		}
+	}
+	// verify id_token and upsert user
+	claims, err := verifyIDToken(c.Request.Context(), tokenResp.IDToken, h.cfg)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid id token", "details": err.Error()})
+		return
+	}
+	u, err := h.usersSvc.UpsertFromClaims(c.Request.Context(), claims)
+	if err != nil || u == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user upsert failed"})
+		return
+	}
+	// create refresh session
+	rft, err := h.sessionsSvc.CreateSession(c.Request.Context(), u.Sub, 7*24*time.Hour)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		return
+	}
+	// create access token
+	access, err := tokens.GenerateAccessToken(h.cfg, u, 15*time.Minute)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create access token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"access_token": access, "refresh_token": rft, "expires_in": 900})
+}
+
+// Refresh accepts a refresh token and returns a new access token
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var req struct{ RefreshToken string `json:"refresh_token" binding:"required"` }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	sess, err := h.sessionsSvc.ValidateRefresh(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "validation failed"})
+		return
+	}
+	if sess == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid refresh token"})
+		return
+	}
+	// load user
+	u, err := h.usersSvc.GetBySub(c.Request.Context(), sess.Sub)
+	if err != nil || u == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "user lookup failed"})
+		return
+	}
+	access, err := tokens.GenerateAccessToken(h.cfg, u, 15*time.Minute)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create access token"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"access_token": access, "expires_in": 900})
+}
+
+// Logout invalidates the refresh token
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req struct{ RefreshToken string `json:"refresh_token" binding:"required"` }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.sessionsSvc.DeleteRefresh(c.Request.Context(), req.RefreshToken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove session"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
+}
+
+// The functions requestPasswordToken and verifyIDToken are lightweight helpers implemented in the same package file
+// to keep the handler tidy. They use HTTP requests and the OIDC verifier.
+
+// NOTE: to avoid cyclic imports we keep the implementation local and simple.
+
+type tokenResponse struct {
+	AccessToken string `json:"access_token"`
+	IDToken     string `json:"id_token"`
+}
+
+func requestPasswordToken(ctx context.Context, host, realm, clientID, clientSecret, username, password string, cfg *config.Config) (*tokenResponse, error) {
+	// direct HTTP POST
+	tokenURL := host + "/realms/" + realm + "/protocol/openid-connect/token"
+	// Use net/http
+	form := urlValues(map[string]string{
+		"grant_type": "password",
+		"client_id":  clientID,
+		"client_secret": clientSecret,
+		"username": username,
+		"password": password,
+	})
+	resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", form)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(b))
+	}
+	var tr tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return nil, err
+	}
+	return &tr, nil
+}
+
+func requestAuthCodeToken(ctx context.Context, host, realm, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
+	// token exchange for authorization code
+	tokenURL := host + "/realms/" + realm + "/protocol/openid-connect/token"
+	form := urlValues(map[string]string{
+		"grant_type":    "authorization_code",
+		"client_id":     clientID,
+		"client_secret": clientSecret,
+		"code":          code,
+		"redirect_uri":  redirectURI,
+	})
+	resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", form)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(b))
+	}
+	var tr tokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		return nil, err
+	}
+	return &tr, nil
+}
+
+func verifyIDToken(ctx context.Context, idToken string, cfg *config.Config) (map[string]interface{}, error) {
+	// Use the OIDC verifier if available, otherwise fall back to insecure parsing when allowed
+	// We perform a minimal parse: when ALLOW_INSECURE_TOKEN=true we just decode payload
+	// Normalize issuer
+	issuer := strings.TrimRight(cfg.Keycloak.URL, "/") + "/realms/" + cfg.Keycloak.Realm
+	ver, err := oidc.NewVerifier(ctx, issuer, cfg.Keycloak.ClientID)
+	if err != nil {
+		if strings.ToLower(strings.TrimSpace(os.Getenv("ALLOW_INSECURE_TOKEN"))) == "true" {
+			iv := oidc.NewInsecureVerifier()
+			tkn, err := iv.Verify(ctx, idToken)
+			if err != nil {
+				return nil, err
+			}
+			var claims map[string]interface{}
+			if err := tkn.Claims(&claims); err != nil {
+				return nil, err
+			}
+			return claims, nil
+		}
+		return nil, err
+	}
+	idt, err := ver.Verify(ctx, idToken)
+	if err != nil {
+		return nil, err
+	}
+	var claims map[string]interface{}
+	if err := idt.Claims(&claims); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// small helpers below
+
+// (helpers implemented inline below)
+
+func urlValues(m map[string]string) io.Reader {
+	v := url.Values{}
+	for k, vv := range m {
+		v.Set(k, vv)
+	}
+	return strings.NewReader(v.Encode())
+}

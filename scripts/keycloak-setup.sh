@@ -127,8 +127,8 @@ client_exists=$(admin_call GET "/admin/realms/$REALM/clients?clientId=$CLIENT_ID
 if [ -n "$client_exists" ] && [ "$client_exists" != "null" ]; then
   echo "Client '$CLIENT_ID' already exists"
 else
-  echo "Creating client '$CLIENT_ID' (confidential + direct access grants enabled)"
-  client_json=$(jq -n --arg cid "$CLIENT_ID" '{clientId: $cid, enabled: true, publicClient: false, directAccessGrantsEnabled: true, serviceAccountsEnabled: true, redirectUris: ["http://localhost:3000/*","http://localhost:5001/*"], protocol: "openid-connect"}')
+  echo "Creating client '$CLIENT_ID' (confidential + direct access grants + standard flow enabled)"
+  client_json=$(jq -n --arg cid "$CLIENT_ID" '{clientId: $cid, enabled: true, publicClient: false, directAccessGrantsEnabled: true, serviceAccountsEnabled: true, standardFlowEnabled: true, redirectUris: ["http://localhost:3000/*","http://localhost:5001/*","http://cb-sink:3000/*","http://cb-sink:3000/callback"], protocol: "openid-connect"}')
   admin_call POST "/admin/realms/$REALM/clients" "$client_json" >/dev/null
   echo "Client created"
 fi
@@ -141,9 +141,10 @@ else
   echo "Ensuring client configuration for '$CLIENT_ID' (id: $CLIENT_INTERNAL_ID)"
   # Ensure direct access grants enabled (allows resource-owner-password credentials)
   CLIENT_REPR=$(admin_call GET "/admin/realms/$REALM/clients/$CLIENT_INTERNAL_ID")
-  UPDATED_CLIENT_REPR=$(echo "$CLIENT_REPR" | jq '.directAccessGrantsEnabled = true | .publicClient = false | .serviceAccountsEnabled = true')
+  # Ensure required flags and redirect URIs are present (idempotent)
+  UPDATED_CLIENT_REPR=$(echo "$CLIENT_REPR" | jq '.directAccessGrantsEnabled = true | .publicClient = false | .serviceAccountsEnabled = true | .standardFlowEnabled = true | .redirectUris += ["http://cb-sink:3000/*","http://cb-sink:3000/callback"] | .redirectUris |= (unique)')
   admin_call PUT "/admin/realms/$REALM/clients/$CLIENT_INTERNAL_ID" "$UPDATED_CLIENT_REPR" >/dev/null || true
-  echo "Client configuration updated (directAccessGrantsEnabled = true)"
+  echo "Client configuration updated (directAccessGrantsEnabled = true, standardFlowEnabled = true, redirectUris ensured)"
 
   echo "Ensuring client secret for '$CLIENT_ID' (id: $CLIENT_INTERNAL_ID)"
   SECRET_RESP=$(admin_call POST "/admin/realms/$REALM/clients/$CLIENT_INTERNAL_ID/client-secret")

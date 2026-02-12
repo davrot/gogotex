@@ -1,0 +1,24 @@
+services:
+  gogotex-auth:
+    image: gogotex-auth:local
+    container_name: gogotex-auth
+    hostname: gogotex-auth
+    restart: unless-stopped
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8081
+      - KEYCLOAK_URL=http://keycloak-keycloak:8080/sso
+      - KEYCLOAK_CLIENT_ID=gogotex-backend
+      - MONGODB_URI=mongodb://mongodb-mongodb:27017
+      - MONGODB_DATABASE=gogotex
+    networks:
+      - tex-network
+    depends_on:
+      mongodb-mongodb:
+        condition: service_healthy
+      keycloak-keycloak:
+        condition: service_healthy
+
+networks:
+  tex-network:
+    external: true

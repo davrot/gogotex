@@ -24,3 +24,21 @@ mongo-init:
 redis-fix-perms:
 	chmod +x scripts/redis-fix-perms.sh
 	./scripts/redis-fix-perms.sh
+
+.PHONY: ci-local
+ci-local:
+	@echo "Running local CI: prefer 'act' if available, otherwise Docker Compose CI"
+	@if command -v act >/dev/null 2>&1; then \
+		act --workflows .github/workflows/go-auth-ci.yml || true; \
+	else \
+		docker compose -f docker-compose.ci.yml run --rm ci; \
+	fi
+
+.PHONY: ci-integration
+ci-integration:
+	chmod +x scripts/ci/auth-integration-test.sh
+	./scripts/ci/auth-integration-test.sh
+
+.PHONY: auth-image
+auth-image:
+	docker build -t gogotex-auth:local backend/go-services

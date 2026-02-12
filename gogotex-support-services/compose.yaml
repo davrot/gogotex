@@ -110,6 +110,14 @@ services:
         condition: service_healthy
 
 #########
+# Auth (local dev) #
+#########
+  gogotex-auth:
+    extends:
+      file: ./auth-service/auth.yaml
+      service: gogotex-auth
+
+#########
 # nginx #
 #########
   nginx-nginx:
@@ -117,6 +125,8 @@ services:
       file: ./nginx-service/nginx.yaml
       service: nginx-nginx
     depends_on:
+      gogotex-auth:
+        condition: service_healthy
       grafana-grafana:
         condition: service_healthy
       keycloak-keycloak:
