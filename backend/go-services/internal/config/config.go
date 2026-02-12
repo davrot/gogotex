@@ -78,13 +78,19 @@ func LoadConfig() (*Config, error) {
 	viper.SetDefault("JWT_ACCESS_TOKEN_TTL", 15)
 	viper.SetDefault("JWT_REFRESH_TOKEN_TTL", 10080)
 
-// Rate limiting defaults
-viper.SetDefault("RATE_LIMIT_ENABLED", true)
-viper.SetDefault("RATE_LIMIT_RPS", 10)
-viper.SetDefault("RATE_LIMIT_BURST", 40)
-// Redis-backed rate limiter defaults
-viper.SetDefault("RATE_LIMIT_USE_REDIS", false)
-viper.SetDefault("RATE_LIMIT_WINDOW_SECONDS", 1)
+	// Rate limiting defaults
+	viper.SetDefault("RATE_LIMIT_ENABLED", true)
+	viper.SetDefault("RATE_LIMIT_RPS", 10)
+	viper.SetDefault("RATE_LIMIT_BURST", 40)
+	// Redis-backed rate limiter defaults
+	viper.SetDefault("RATE_LIMIT_USE_REDIS", false)
+	viper.SetDefault("RATE_LIMIT_WINDOW_SECONDS", 1)
+
+	cfg := &Config{
+		Server: ServerConfig{
+			Port:        viper.GetString("SERVER_PORT"),
+			Host:        viper.GetString("SERVER_HOST"),
+			Environment: viper.GetString("SERVER_ENVIRONMENT"),
 			ReadTimeout: 30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
@@ -108,27 +114,14 @@ viper.SetDefault("RATE_LIMIT_WINDOW_SECONDS", 1)
 		JWT: JWTConfig{
 			Secret:          os.Getenv("JWT_SECRET"),
 			AccessTokenTTL:  time.Duration(viper.GetInt("JWT_ACCESS_TOKEN_TTL")) * time.Minute,
-			RefreshTo      viper.GetBool("RATE_LIMIT_ENABLED"),
+			RefreshTokenTTL: time.Duration(viper.GetInt("JWT_REFRESH_TOKEN_TTL")) * time.Minute,
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:       viper.GetBool("RATE_LIMIT_ENABLED"),
 			RPS:           float64(viper.GetFloat64("RATE_LIMIT_RPS")),
 			Burst:         viper.GetInt("RATE_LIMIT_BURST"),
 			UseRedis:      viper.GetBool("RATE_LIMIT_USE_REDIS"),
-			WindowSeconds: viper.GetInt("RATE_LIMIT_WINDOW_SECONDS
-			Enabled: viper.GetBool("RATE_LIMIT_ENABLED"),
-			RPS:     float64(viper.GetFloat64("RATE_LIMIT_RPS")),
-			Burst:   viper.GetInt("RATE_LIMIT_BURST"),
-		},
-	}
-
-	// Basic validation
-	if cfg.JWT.Secret == "" {
-		log.Println("WARNING: JWT_SECRET is not set; set a secure value in production")
-	}
-
-	return cfg, nil
-}
-
-func getEnvOrPanic(key string) string {
-	v := os.Getenv(key)
+			WindowSeconds: viper.GetInt("RATE_LIMIT_WINDOW_SECONDS"),
 	if v == "" {
 		log.Fatalf("environment variable %s is required", key)
 	}

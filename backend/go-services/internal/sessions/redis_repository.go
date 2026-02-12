@@ -32,7 +32,6 @@ func (r *RedisRepository) Create(ctx context.Context, s *Session) error {
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
 	exp := time.Until(s.ExpiresAt)
 	if exp <= 0 {
 		// ensure a minimal TTL so Redis won't store expired sessions
