@@ -155,13 +155,19 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
     CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
     echo "DEBUG: started auth container id=$CID"
     if [ -n "$CID" ]; then
-      # wait up to 15s for the container to acquire an IP on the network
-      for _i in {1..15}; do
-        debug_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+      # wait up to 30s for the container to acquire an IP on the desired network
+      for _i in {1..30}; do
+        # prefer the IP on the `tex-network` (if present)
+        debug_ip=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{if eq $k "tex-network"}}{{$v.IPAddress}}{{end}}{{end}}' "$CID" 2>/dev/null || true)
+        # fallback to any IP if `tex-network` key missing
+        if [ -z "$debug_ip" ]; then
+          debug_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+        fi
         if [ -n "$debug_ip" ]; then
           echo "DEBUG: started auth container ip=$debug_ip"; break
         fi
-        # short sleep before retrying
+        # attempt to (re)connect container to the network if not present
+        docker network connect "$NET" "$CID" >/dev/null 2>&1 || true
         sleep 1
       done
       # final echo (may be empty if IP still missing)
