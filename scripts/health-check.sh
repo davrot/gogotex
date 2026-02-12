@@ -44,14 +44,28 @@ fi
 # list local container names for later per-service checks
 CONTAINERS=$(docker ps --format '{{.Names}}')
 
-# Key services to look for (prefer exact or typical service names)
-KEYCLOAK_C="keycloak-keycloak"
-MONGO_C="mongodb-mongodb"
-REDIS_C="redis-redis"
-MINIO_C="minio-minio"
-PROM_C="grafana-prometheus"
-GRAF_C="grafana-grafana"
-NGINX_C="nginx-nginx"
+# helper to find a container by regex (prefers common service names)
+find_container() {
+  echo "$CONTAINERS" | grep -E "$1" | grep -v -E "exporter|healthcheck" | head -n1 || true
+}
+
+# Detect the actual container names (fallback to sensible defaults)
+KEYCLOAK_C=$(find_container "(^keycloak-keycloak$|keycloak|gogotex-keycloak")
+MONGO_C=$(find_container "(^mongodb-mongodb$|mongo|mongodb)")
+REDIS_C=$(find_container "(^redis-redis$|redis)")
+MINIO_C=$(find_container "(^minio-minio$|minio)")
+PROM_C=$(find_container "(^grafana-prometheus$|prometheus|prom)")
+GRAF_C=$(find_container "(^grafana-grafana$|grafana)")
+NGINX_C=$(find_container "(^nginx-nginx$|nginx)")
+
+# Fallback values (used by standalone sub-scripts if detection fails)
+KEYCLOAK_C=${KEYCLOAK_C:-keycloak-keycloak}
+MONGO_C=${MONGO_C:-mongodb-mongodb}
+REDIS_C=${REDIS_C:-redis-redis}
+MINIO_C=${MINIO_C:-minio-minio}
+PROM_C=${PROM_C:-grafana-prometheus}
+GRAF_C=${GRAF_C:-grafana-grafana}
+NGINX_C=${NGINX_C:-nginx-nginx}
 
 # Keycloak checks are now in a separate script for clarity
 source "$ROOT_DIR/scripts/health-check/keycloak.sh"
