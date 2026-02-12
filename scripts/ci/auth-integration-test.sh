@@ -103,12 +103,11 @@ fi
 AUTH_IMAGE="gogotex-auth:ci"
 AUTH_CONTAINER_NAME="gogotex-auth-integration"
 
-# If a long-running 'gogotex-auth' container already exists, reuse it for the
-# integration checks instead of starting a new container (helps local/dev runs).
-if docker ps --format '{{.Names}}' | grep -q '^gogotex-auth$'; then
-  echo "Found existing 'gogotex-auth' container — reusing it for integration checks"
-  AUTH_CONTAINER_NAME="gogotex-auth"
-fi
+# Always run a fresh integration container for deterministic tests (use
+# AUTH_CONTAINER_NAME=gogotex-auth to explicitly reuse a long-running container).
+# Remove any previous integration container with the same name to avoid conflicts.
+docker rm -f "gogotex-auth-integration" >/dev/null 2>&1 || true
+AUTH_CONTAINER_NAME="gogotex-auth-integration"
 
 # Build image
 echo "Building auth image $AUTH_IMAGE..."
@@ -152,12 +151,22 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
     # we created a fresh integration container
     CREATED_AUTH_CONTAINER=true
 
-    # debug: expose started container id + IP
+    # debug: expose started container id + IP. wait for network IP to appear (docker DNS sometimes lags)
     CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
     echo "DEBUG: started auth container id=$CID"
     if [ -n "$CID" ]; then
-      debug_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
-      echo "DEBUG: started auth container ip=$debug_ip"
+      # wait up to 15s for the container to acquire an IP on the network
+      for _i in {1..15}; do
+        debug_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+        if [ -n "$debug_ip" ]; then
+          echo "DEBUG: started auth container ip=$debug_ip"; break
+        fi
+        # short sleep before retrying
+        sleep 1
+      done
+      # final echo (may be empty if IP still missing)
+      debug_ip=${debug_ip:-}
+      echo "DEBUG: started auth container ip=${debug_ip:-<none>}"
     fi
   fi
 # Determine how to reach the auth service for health/metrics checks.
