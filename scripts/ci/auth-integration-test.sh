@@ -138,7 +138,7 @@ else
   # Remove any previous container with same name to avoid conflicts
   docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true
   # Start the container
-  if ! docker run -d --name "$AUTH_CONTAINER_NAME" --network "$NET" -e KC_INSECURE=true \
+  if ! docker run -d --name "$AUTH_CONTAINER_NAME" --network "$NET" -p 127.0.0.1:8081:8081 -e KC_INSECURE=true \
     -e ALLOW_INSECURE_TOKEN=true \
     -e KEYCLOAK_URL=http://keycloak-keycloak:8080/sso \
     -e KEYCLOAK_REALM=gogotex \
