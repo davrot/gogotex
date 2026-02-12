@@ -1,0 +1,22 @@
+FROM ubuntu:24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq \
+  && apt-get install -y -qq --no-install-recommends \
+    ca-certificates \
+    curl \
+    jq \
+    git \
+    docker.io \
+    python3 \
+    python3-pip \
+    bash \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install lightweight Python deps used by integration script
+RUN python3 -m pip install --no-cache-dir requests beautifulsoup4 >/dev/null 2>&1 || true
+
+WORKDIR /workdir
+
+# Default entrypoint is a shell so the test script can be executed by bind-mounting the repo
+ENTRYPOINT ["/bin/bash"]

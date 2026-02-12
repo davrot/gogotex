@@ -42,3 +42,14 @@ ci-integration:
 .PHONY: auth-image
 auth-image:
 	docker build -t gogotex-auth:local backend/go-services
+
+.PHONY: integration-runner-image
+integration-runner-image:
+	@echo "Building integration-runner image (ubuntu + docker + curl + jq)..."
+	docker build -f scripts/ci/Dockerfile.integration -t gogotex/integration-runner:latest .
+	@echo "Built gogotex/integration-runner:latest"
+
+.PHONY: run-integration-in-docker
+run-integration-in-docker:
+	chmod +x scripts/ci/run-integration-in-docker.sh
+	./scripts/ci/run-integration-in-docker.sh
