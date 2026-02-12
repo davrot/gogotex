@@ -3,7 +3,6 @@ package middleware
 import (
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
@@ -58,6 +57,10 @@ func RateLimitMiddleware(rps float64, burst int) gin.HandlerFunc {
 		}
 		// record allowed
 		metrics.RateLimitAllowed.WithLabelValues("memory").Inc()
+		c.Next()
+	}
+}
+
 		c.Next()
 	}
 }
