@@ -15,6 +15,8 @@ if [ -f "$SUPPORT_ENV" ]; then
 fi
 KEYCLOAK_USER=${KEYCLOAK_USER:-admin}
 KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-changeme_keycloak}
+# default path to the client secret created by the Keycloak support service
+KEYCLOAK_SECRET_FILE=${KEYCLOAK_SECRET_FILE:-"$ROOT_DIR/gogotex-support-services/keycloak-service/client-secret_gogotex-backend.txt"}
 
 # expects: OK/FAIL helper functions, KEYCLOAK_* vars from caller
 
