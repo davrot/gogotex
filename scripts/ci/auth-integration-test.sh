@@ -105,6 +105,13 @@ fi
 AUTH_IMAGE="gogotex-auth:ci"
 AUTH_CONTAINER_NAME="gogotex-auth-integration"
 
+# If a long-running 'gogotex-auth' container already exists, reuse it for the
+# integration checks instead of starting a new container (helps local/dev runs).
+if docker ps --format '{{.Names}}' | grep -q '^gogotex-auth$'; then
+  echo "Found existing 'gogotex-auth' container — reusing it for integration checks"
+  AUTH_CONTAINER_NAME="gogotex-auth"
+fi
+
 # Build image
 echo "Building auth image $AUTH_IMAGE..."
 docker build -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
@@ -123,26 +130,40 @@ cleanup() {
 trap cleanup EXIT
 
 # Run the auth service as a container on the same network
+# If reusing an already-running 'gogotex-auth' container we don't re-create it.
 echo "Starting auth service container ($AUTH_CONTAINER_NAME) on network $NET..."
-# Remove any previous container with same name to avoid conflicts
-docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true
-# Start the container
-if ! docker run -d --name "$AUTH_CONTAINER_NAME" --network "$NET" -e KC_INSECURE=true \
-  -e ALLOW_INSECURE_TOKEN=true \
-  -e KEYCLOAK_URL=http://keycloak-keycloak:8080/sso \
-  -e KEYCLOAK_REALM=gogotex \
-  -e KEYCLOAK_CLIENT_ID=gogotex-backend \
-  -e KEYCLOAK_CLIENT_SECRET="$CLIENT_SECRET" \
-  -e MONGODB_URI=mongodb://mongodb-mongodb:27017 \
-  -e MONGODB_DATABASE=gogotex \
-  -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
-  "$AUTH_IMAGE"; then
-  echo "ERROR: failed to start auth container"; exit 5
+if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
+  echo "Reusing existing container '$AUTH_CONTAINER_NAME' — not creating a new one"
+else
+  # Remove any previous container with same name to avoid conflicts
+  docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true
+  # Start the container
+  if ! docker run -d --name "$AUTH_CONTAINER_NAME" --network "$NET" -e KC_INSECURE=true \
+    -e ALLOW_INSECURE_TOKEN=true \
+    -e KEYCLOAK_URL=http://keycloak-keycloak:8080/sso \
+    -e KEYCLOAK_REALM=gogotex \
+    -e KEYCLOAK_CLIENT_ID=gogotex-backend \
+    -e KEYCLOAK_CLIENT_SECRET="$CLIENT_SECRET" \
+    -e MONGODB_URI=mongodb://mongodb-mongodb:27017 \
+    -e MONGODB_DATABASE=gogotex \
+    -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
+    "$AUTH_IMAGE"; then
+    echo "ERROR: failed to start auth container"; exit 5
+  fi
 fi
 
-# Wait for auth container to be healthy (HTTP /health)
+# Determine how to reach the auth service for health/metrics checks.
+# - If we reused a running container, call the host-mapped port (localhost:8081)
+# - Otherwise, use in-network container name
+if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
+  AUTH_HOST="localhost:8081"
+else
+  AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
+fi
+
+# Wait for auth service to be healthy (HTTP /health)
 for i in {1..60}; do
-  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_CONTAINER_NAME:8081/health || echo 000)
+  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/health || echo 000)
   echo "Auth HTTP: $HTTP_CODE"
   if [ "$HTTP_CODE" = "200" ]; then
     echo 'Auth service listening'; break
@@ -160,11 +181,11 @@ fi
 
 echo "Verifying rate-limiter + metrics on auth service..."
 # send two quick /health requests: first should be 200, second likely 429 when test RPS/burst are restrictive
-R1=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_CONTAINER_NAME:8081/health || echo 000)
-R2=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_CONTAINER_NAME:8081/health || echo 000)
+R1=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/health || echo 000)
+R2=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/health || echo 000)
 echo "rate-test responses: $R1 $R2"
 # fetch metrics and check for rate-limit counters
-METRICS=$(docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_CONTAINER_NAME:8081/metrics || true)
+METRICS=$(docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_HOST/metrics || true)
 if echo "$METRICS" | grep -q '^gogotex_rate_limit_allowed_total'; then
   echo "Found rate_limit_allowed metric"
 else
@@ -496,7 +517,7 @@ FAIL_ON_AUTH_CODE=${FAIL_ON_AUTH_CODE:-true}
 EXCHANGE_SUCCESS=false
 for attempt in $(seq 1 $MAX_ATTEMPTS); do
   echo "Exchanging code via auth service (attempt $attempt/$MAX_ATTEMPTS)..."
-  LOGIN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d '{"mode":"auth_code","code":"'"$CODE"'","redirect_uri":"'"$REDIRECT_URI"'"}' http://$AUTH_CONTAINER_NAME:8081/api/v1/auth/login || true)
+  LOGIN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d '{"mode":"auth_code","code":"'"$CODE"'","redirect_uri":"'"$REDIRECT_URI"'"}' http://$AUTH_HOST/api/v1/auth/login || true)"$CODE"'","redirect_uri":"'"$REDIRECT_URI"'"}' http://$AUTH_CONTAINER_NAME:8081/api/v1/auth/login || true)
   if echo "$LOGIN_RESP" | jq -e '.access_token' >/dev/null 2>&1; then
     echo "✅ Auth-code E2E: auth service exchanged code and returned tokens"
     echo "$LOGIN_RESP" | jq .
@@ -637,7 +658,7 @@ if echo "$RESP" | jq -e '.user.sub' >/dev/null 2>&1; then
 else
   echo "❌ Integration test (via nginx) failed. Response:"; echo "$RESP" | sed -n '1,200p'
   echo "Falling back to direct container check for debugging..."
-  RESP2=$(docker run --rm --network "$NET" curlimages/curl -sS -H "Authorization: Bearer $AUTH_TOKEN" http://$AUTH_CONTAINER_NAME:8081/api/v1/me || true)
+  RESP2=$(docker run --rm --network "$NET" curlimages/curl -sS -H "Authorization: Bearer $AUTH_TOKEN" http://$AUTH_HOST/api/v1/me || true)
   echo "Direct container response:"; echo "$RESP2" | sed -n '1,200p'
   echo "Auth logs:"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,200p'
   docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true
