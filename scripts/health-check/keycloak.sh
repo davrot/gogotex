@@ -7,7 +7,7 @@ fi
 if ! declare -f fail >/dev/null 2>&1; then
   fail(){ echo "❌ $1"; FAILED=${FAILED:-0}; FAILED=$((FAILED+1)); }
 fi
-ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/.." && pwd)"}
+ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/../.." && pwd)"}
 CONTAINERS=${CONTAINERS:-$(docker ps --format '{{.Names}}' 2>/dev/null || true)}
 SUPPORT_ENV="$ROOT_DIR/gogotex-support-services/.env"
 if [ -f "$SUPPORT_ENV" ]; then
@@ -19,8 +19,6 @@ KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-changeme_keycloak}
 KEYCLOAK_SECRET_FILE=${KEYCLOAK_SECRET_FILE:-"$ROOT_DIR/gogotex-support-services/keycloak-service/client-secret_gogotex-backend.txt"}
 
 # expects: OK/FAIL helper functions, KEYCLOAK_* vars from caller
-
-KEYCLOAK_C="keycloak-keycloak"
 
 echo
 echo "== Keycloak checks =="

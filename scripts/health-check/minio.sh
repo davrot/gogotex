@@ -6,7 +6,7 @@ fi
 if ! declare -f fail >/dev/null 2>&1; then
   fail(){ echo "❌ $1"; FAILED=${FAILED:-0}; FAILED=$((FAILED+1)); }
 fi
-ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/.." && pwd)"}
+ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/../.." && pwd)"}
 CONTAINERS=${CONTAINERS:-$(docker ps --format '{{.Names}}' 2>/dev/null || true)}
 SUPPORT_ENV="$ROOT_DIR/gogotex-support-services/.env"
 if [ -f "$SUPPORT_ENV" ]; then
@@ -18,8 +18,6 @@ MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-changeme_minio}
 MINIO_BUCKET=${MINIO_BUCKET:-gogotex}
 
 # expects: ok/fail helpers and MINIO_* env vars
-
-MINIO_C="minio-minio"
 
 echo
 echo "== MinIO checks =="

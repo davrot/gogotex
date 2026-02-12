@@ -6,13 +6,11 @@ fi
 if ! declare -f fail >/dev/null 2>&1; then
   fail(){ echo "❌ $1"; FAILED=${FAILED:-0}; FAILED=$((FAILED+1)); }
 fi
-ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/.." && pwd)"}
+ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/../.." && pwd)"}
 CONTAINERS=${CONTAINERS:-$(docker ps --format '{{.Names}}' 2>/dev/null || true)}
 GRAF_C=${GRAF_C:-grafana-grafana}
 
 # expects: GRAF_C variable and ok/fail helpers
-
-GRAF_C="grafana-grafana"
 
 echo
 echo "== Grafana quick check =="
