@@ -5,6 +5,16 @@ set -euo pipefail
 # Basic infrastructure health checks for Phase 1
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# If not already running inside the helper Docker runner, re-exec this script
+# inside an Ubuntu container attached to the `tex-network` so internal container
+# hostnames (e.g. keycloak-keycloak, mongodb-mongodb) resolve reliably.
+if [ "${HEALTH_CHECK_IN_DOCKER:-}" != "1" ]; then
+  echo "Re-running health checks inside ephemeral Ubuntu container on network 'tex-network'..."
+  docker run --rm -v "$ROOT_DIR":"$ROOT_DIR" -w "$ROOT_DIR" -v /var/run/docker.sock:/var/run/docker.sock --network tex-network ubuntu:24.04 \
+    bash -lc "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null; apt-get install -y -qq docker.io curl jq bash >/dev/null; HEALTH_CHECK_IN_DOCKER=1 bash '$ROOT_DIR/scripts/health-check.sh' \"$@\""
+  exit $?
+fi
+
 SUPPORT_DIR="$ROOT_DIR/gogotex-support-services"
 KEYCLOAK_SECRET_FILE="$SUPPORT_DIR/keycloak-service/client-secret_gogotex-backend.txt"
 KEYCLOAK_USER="admin"
