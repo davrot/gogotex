@@ -51,10 +51,13 @@ func RateLimitMiddleware(rps float64, burst int) gin.HandlerFunc {
 		if !lim.Allow() {
 			// set common rate limit headers (informational)
 			c.Header("Retry-After", "1")
-		// record metric and reject
-		metrics.RateLimitRejected.WithLabelValues("memory").Inc()
-		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
-		return
+			// record metric and reject
+			metrics.RateLimitRejected.WithLabelValues("memory").Inc()
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
+			return
+		}
+		// record allowed
+		metrics.RateLimitAllowed.WithLabelValues("memory").Inc()
+		c.Next()
 	}
-	// record allowed
-	metrics.RateLimitAllowed.WithLabelValues("memory").Inc()
+}

@@ -122,6 +122,19 @@ func LoadConfig() (*Config, error) {
 			Burst:         viper.GetInt("RATE_LIMIT_BURST"),
 			UseRedis:      viper.GetBool("RATE_LIMIT_USE_REDIS"),
 			WindowSeconds: viper.GetInt("RATE_LIMIT_WINDOW_SECONDS"),
+		},
+	}
+
+	// Basic validation
+	if cfg.JWT.Secret == "" {
+		log.Println("WARNING: JWT_SECRET is not set; set a secure value in production")
+	}
+
+	return cfg, nil
+}
+
+func getEnvOrPanic(key string) string {
+	v := os.Getenv(key)
 	if v == "" {
 		log.Fatalf("environment variable %s is required", key)
 	}
