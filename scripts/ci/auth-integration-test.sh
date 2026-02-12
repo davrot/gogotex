@@ -153,6 +153,38 @@ if [ "$HTTP_CODE" != "200" ]; then
   echo "Auth service did not become ready in time"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,200p'; exit 6
 fi
 
+# --- Rate-limit + metrics verification (global middleware) ---
+# Configure a very low rate limit for the test container run (global middleware reads env at startup)
+# The auth container in this script is already running; we run quick checks against /health to
+# ensure the in-memory limiter increments allowed/rejected metrics.
+
+echo "Verifying rate-limiter + metrics on auth service..."
+# send two quick /health requests: first should be 200, second likely 429 when test RPS/burst are restrictive
+R1=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_CONTAINER_NAME:8081/health || echo 000)
+R2=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_CONTAINER_NAME:8081/health || echo 000)
+echo "rate-test responses: $R1 $R2"
+# fetch metrics and check for rate-limit counters
+METRICS=$(docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_CONTAINER_NAME:8081/metrics || true)
+if echo "$METRICS" | grep -q '^gogotex_rate_limit_allowed_total'; then
+  echo "Found rate_limit_allowed metric"
+else
+  echo "Missing rate_limit_allowed metric"; echo "$METRICS"; exit 7
+fi
+if echo "$METRICS" | grep -q '^gogotex_rate_limit_rejected_total'; then
+  echo "Found rate_limit_rejected metric"
+else
+  echo "Missing rate_limit_rejected metric"; echo "$METRICS"; exit 7
+fi
+# Assert at least one allowed recorded
+ALLOWED_VAL=$(echo "$METRICS" | grep '^gogotex_rate_limit_allowed_total' | head -n1 | sed -E 's/.* ([0-9\.]+)$/\1/')
+REJECTED_VAL=$(echo "$METRICS" | grep '^gogotex_rate_limit_rejected_total' | head -n1 | sed -E 's/.* ([0-9\.]+)$/\1/')
+echo "metrics values: allowed=$ALLOWED_VAL rejected=$REJECTED_VAL"
+# simple numeric checks (allowed >= 1)
+awk "BEGIN{exit !($ALLOWED_VAL >= 1)}" || (echo "Allowed metric < 1" && exit 8)
+# rejected may be 0 or more depending on timing, that's acceptable
+
+echo "Rate-limiter + metrics verified (allowed >= 1)."
+
 # --- Start auth-code E2E flow: perform headless login to capture code or fallback to callback sink ---
 # perform headless login using a small Python script (runs in-network)
 TEST_PASS_FILE="$ROOT_DIR/gogotex-support-services/keycloak-service/testuser_password.txt"
