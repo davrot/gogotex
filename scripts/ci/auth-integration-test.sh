@@ -150,6 +150,14 @@ else
     "$AUTH_IMAGE"; then
     echo "ERROR: failed to start auth container"; exit 5
   fi
+
+  # debug: expose started container id + IP (helps when DNS lookup fails)
+  CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
+  echo "DEBUG: started auth container id=$CID"
+  if [ -n "$CID" ]; then
+    debug_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+    echo "DEBUG: started auth container ip=$debug_ip"
+  fi
 fi
 
 # Determine how to reach the auth service for health/metrics checks.
