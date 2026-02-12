@@ -1,5 +1,24 @@
 # Keycloak checks (sourced by scripts/health-check.sh)
+# Standalone bootstrap: define helpers, load .env and defaults so this file
+# can be executed directly (e.g. ./scripts/health-check/keycloak.sh).
+if ! declare -f ok >/dev/null 2>&1; then
+  ok(){ echo "✅ $1"; PASSED=${PASSED:-0}; PASSED=$((PASSED+1)); }
+fi
+if ! declare -f fail >/dev/null 2>&1; then
+  fail(){ echo "❌ $1"; FAILED=${FAILED:-0}; FAILED=$((FAILED+1)); }
+fi
+ROOT_DIR=${ROOT_DIR:-"$(cd "$(dirname "$0")/.." && pwd)"}
+CONTAINERS=${CONTAINERS:-$(docker ps --format '{{.Names}}' 2>/dev/null || true)}
+SUPPORT_ENV="$ROOT_DIR/gogotex-support-services/.env"
+if [ -f "$SUPPORT_ENV" ]; then
+  set -o allexport; source "$SUPPORT_ENV"; set +o allexport
+fi
+KEYCLOAK_USER=${KEYCLOAK_USER:-admin}
+KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-changeme_keycloak}
+
 # expects: OK/FAIL helper functions, KEYCLOAK_* vars from caller
+
+KEYCLOAK_C="keycloak-keycloak"
 
 echo
 echo "== Keycloak checks =="
