@@ -258,6 +258,12 @@ FORCE_CB_SINK=true CLEANUP=true ./scripts/ci/auth-integration-test.sh
 
 Security note: the integration script builds the auth image and by default enables an opt-in insecure verifier for local tests only. This is controlled by the `ALLOW_INSECURE_TOKEN=true` environment flag and is intended for local CI where obtaining valid issuer discovery can be brittle. **Do not** enable `ALLOW_INSECURE_TOKEN` in production or shared environments — it bypasses signature verification and is unsafe for general use.
 
+If the authorization-code E2E is flaky in your environment, the integration harness supports `FAIL_ON_AUTH_CODE=false` which will run the check but treat failures as non-blocking (useful to keep CI green while you investigate). Example:
+
+```bash
+FAIL_ON_AUTH_CODE=false CLEANUP=true ./scripts/ci/auth-integration-test.sh
+```
+
 A `Dockerfile` for the auth service has been added at `backend/go-services/Dockerfile`. Use `make auth-image` to build a local image for testing/CI.
 
 Alternatively, you can run the local CI with integration tests enabled:

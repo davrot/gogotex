@@ -127,3 +127,25 @@ func TestRequestAuthCodeToken_Error(t *testing.T) {
 		assert.Contains(t, err.Error(), "token endpoint returned 400")
 	}
 }
+
+func TestRequestAuthCodeToken_RetrySucceeds(t *testing.T) {
+	// first response is 400 Code not valid, second response is 200
+	calls := 0
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(400)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Code not valid"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "ok", "id_token": "idtok"})
+	}))
+	defer tokenSrv.Close()
+
+	tr, err := requestAuthCodeToken(context.Background(), tokenSrv.URL, "gogotex", "cid", "csecret", "code", "http://cb")
+	assert.NoError(t, err)
+	assert.Equal(t, "ok", tr.AccessToken)
+}
+

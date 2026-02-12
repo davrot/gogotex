@@ -83,9 +83,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		}
 		tokenResp, err = requestAuthCodeToken(c.Request.Context(), host, realm, h.cfg.Keycloak.ClientID, h.cfg.Keycloak.ClientSecret, req.Code, req.RedirectURI)
 		if err != nil {
-			// log token exchange error for easier debugging in CI/integration runs
-			log.Printf("auth-code token exchange error: %v", err)
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed", "details": err.Error()})
+			// log token exchange error with redirect URI for easier debugging in CI/integration runs
+			log.Printf("auth-code token exchange error (redirect_uri=%q): %v", req.RedirectURI, err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed", "details": err.Error(), "redirect_uri_used": req.RedirectURI})
 			return
 		}
 	}
@@ -199,27 +199,43 @@ func requestPasswordToken(ctx context.Context, host, realm, clientID, clientSecr
 func requestAuthCodeToken(ctx context.Context, host, realm, clientID, clientSecret, code, redirectURI string) (*tokenResponse, error) {
 	// token exchange for authorization code
 	tokenURL := host + "/realms/" + realm + "/protocol/openid-connect/token"
-	form := urlValues(map[string]string{
+	formValues := map[string]string{
 		"grant_type":    "authorization_code",
 		"client_id":     clientID,
 		"client_secret": clientSecret,
 		"code":          code,
 		"redirect_uri":  redirectURI,
-	})
-	resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", form)
-	if err != nil {
-		return nil, err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(b))
+
+	// Try the token exchange; if we get a transient 'Code not valid' we retry once (reduces flakiness in CI)
+	for attempt := 1; attempt <= 2; attempt++ {
+		form := urlValues(formValues)
+		resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", form)
+		if err != nil {
+			if attempt == 2 {
+				return nil, err
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(resp.Body)
+			bodyStr := string(b)
+			// If Keycloak responded with Code not valid, allow one quick retry
+			if resp.StatusCode == http.StatusBadRequest && strings.Contains(bodyStr, "Code not valid") && attempt == 1 {
+				time.Sleep(150 * time.Millisecond)
+				continue
+			}
+			return nil, fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, bodyStr)
+		}
+		var tr tokenResponse
+		if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+			return nil, err
+		}
+		return &tr, nil
 	}
-	var tr tokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
-		return nil, err
-	}
-	return &tr, nil
+	return nil, fmt.Errorf("token exchange failed after retries")
 }
 
 func verifyIDToken(ctx context.Context, idToken string, cfg *config.Config) (map[string]interface{}, error) {

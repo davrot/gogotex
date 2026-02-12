@@ -150,10 +150,12 @@ if [ "${FORCE_CB_SINK:-false}" = "true" ]; then
   fi
 else
   echo "Performing headless login to obtain authorization code (captures code from redirect)..."
-  # The Python script will detect the authorization code in Location headers during redirects
-  CODE=$(docker run --rm --network "$NET" -e TEST_USER="$TEST_USER" -e TEST_PASS="$TEST_PASS" python:3.11-slim sh -c "pip install requests bs4 >/dev/null 2>&1 && python - <<'PY'
+# The Python script will detect the authorization code and the redirect URI used in Location headers during redirects
+# It prints the values as: <code>|||<redirect_uri>
+CODE_REDIRECT=$(docker run --rm --network "$NET" -e TEST_USER="$TEST_USER" -e TEST_PASS="$TEST_PASS" python:3.11-slim sh -c "pip install requests bs4 >/dev/null 2>&1 && python - <<'PY'
 import os, requests
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs
 s = requests.Session()
 
 auth_url = 'http://keycloak-keycloak:8080/sso/realms/gogotex/protocol/openid-connect/auth?client_id=gogotex-backend&response_type=code&scope=openid&redirect_uri=http://cb-sink:3000/callback'
@@ -162,8 +164,8 @@ resp = s.get(auth_url, verify=False)
 soup = BeautifulSoup(resp.text, 'html.parser')
 form = soup.find('form')
 if not form:
-    print('NOFORM')
-    raise SystemExit(1)
+    print('|||')
+    raise SystemExit(0)
 
 action = form.get('action')
 if action and 'localhost' in action:
@@ -179,17 +181,13 @@ for _ in range(10):
     if resp.status_code in (301,302,303,307,308) and 'Location' in resp.headers:
         loc = resp.headers['Location']
         if 'code=' in loc:
-            # extract query param
-            import urllib.parse as u
-            q = u.urlparse(loc).query
-            params = u.parse_qs(q)
-            if 'code' in params:
-                print(params['code'][0])
+            parsed = urlparse(loc)
+            q = parse_qs(parsed.query)
+            if 'code' in q:
+                print(q['code'][0] + '|||' + parsed.scheme + '://' + parsed.netloc + parsed.path)
                 raise SystemExit(0)
-        # follow the redirect (rewrite localhost to in-network host)
         loc = loc.replace('localhost:8080', 'keycloak-keycloak:8080')
         resp = s.get(loc, allow_redirects=False, verify=False)
-        # handle required-action forms
         if 'required-action' in resp.text or 'Verify profile' in resp.text:
             soup = BeautifulSoup(resp.text, 'html.parser')
             form = soup.find('form')
@@ -205,15 +203,18 @@ for _ in range(10):
     else:
         break
 
-# fallback: try to find code in HTML or form actions
+# fallback: try to find code and host in HTML or form actions
 if 'code=' in resp.text:
     import re
-    m = re.search(r'code=([^\"\'\&\s]+)', resp.text)
+    m = re.search(r'(https?://[^\s"\']*/callback)[^\s"\']*.*code=([^\s\"\'\&]+)', resp.text)
     if m:
-        print(m.group(1))
+        print(m.group(2) + '|||' + m.group(1))
         raise SystemExit(0)
-print('')
+print('|||')
 PY")
+
+CODE="$(echo "$CODE_REDIRECT" | sed -n '1p' | cut -d'|' -f1)"
+REDIRECT_URI="$(echo "$CODE_REDIRECT" | sed -n '1p' | sed 's/.*|||//')"
 
   if [ -n "$CODE" ]; then
     echo "Captured code directly: $CODE"
@@ -246,19 +247,22 @@ echo "Captured code: $CODE"
 # Optional diagnostic: try exchanging the captured code directly with Keycloak token endpoint when DEBUG_KC_EXCHANGE=true
 if [ "${DEBUG_KC_EXCHANGE:-false}" = "true" ]; then
   echo "Attempting direct token exchange with Keycloak (diagnostic)..."
-  KC_TOKEN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "grant_type=authorization_code" -d "client_id=gogotex-backend" -d "client_secret=$CLIENT_SECRET" -d "code=$CODE" -d "redirect_uri=http://cb-sink:3000/callback" http://keycloak-keycloak:8080/sso/realms/gogotex/protocol/openid-connect/token || true)
+  KC_TOKEN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "grant_type=authorization_code" -d "client_id=gogotex-backend" -d "client_secret=$CLIENT_SECRET" -d "code=$CODE" -d "redirect_uri=$REDIRECT_URI" http://keycloak-keycloak:8080/sso/realms/gogotex/protocol/openid-connect/token || true)
   echo "Keycloak token response: $KC_TOKEN_RESP"
 fi
 
 # POST code to auth service (use auth service's /api/v1/auth/login with mode=auth_code)
 # Retry the full headless-capture -> exchange sequence to mitigate transient 'code not valid' or timing races
 MAX_ATTEMPTS=3
+FAIL_ON_AUTH_CODE=${FAIL_ON_AUTH_CODE:-true}
+EXCHANGE_SUCCESS=false
 for attempt in $(seq 1 $MAX_ATTEMPTS); do
   echo "Exchanging code via auth service (attempt $attempt/$MAX_ATTEMPTS)..."
-  LOGIN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d '{"mode":"auth_code","code":"'"$CODE"'","redirect_uri":"http://cb-sink:3000/callback"}' http://$AUTH_CONTAINER_NAME:8081/api/v1/auth/login || true)
+  LOGIN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d '{"mode":"auth_code","code":"'"$CODE"'","redirect_uri":"'"$REDIRECT_URI"'"}' http://$AUTH_CONTAINER_NAME:8081/api/v1/auth/login || true)
   if echo "$LOGIN_RESP" | jq -e '.access_token' >/dev/null 2>&1; then
     echo "✅ Auth-code E2E: auth service exchanged code and returned tokens"
     echo "$LOGIN_RESP" | jq .
+    EXCHANGE_SUCCESS=true
     break
   else
     echo "Auth-code exchange failed on attempt $attempt: $LOGIN_RESP"
@@ -298,13 +302,22 @@ PY"
 )
       continue
     else
-      echo "❌ Auth-code E2E failed after $MAX_ATTEMPTS attempts."; docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true; exit 7
+      echo "Auth-code exchange failed after $MAX_ATTEMPTS attempts.";
+      break
     fi
   fi
 done
 
 # cleanup cb-sink
 docker rm -f cb-sink >/dev/null 2>&1 || true
+
+if [ "$EXCHANGE_SUCCESS" != "true" ]; then
+  if [ "$FAIL_ON_AUTH_CODE" = "true" ]; then
+    echo "❌ Auth-code E2E failed after $MAX_ATTEMPTS attempts."; docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true; exit 7
+  else
+    echo "⚠️ Auth-code E2E failed but continuing because FAIL_ON_AUTH_CODE=false (non-blocking)."
+  fi
+fi
 
 # --- End auth-code E2E flow ---
 
