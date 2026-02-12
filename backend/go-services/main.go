@@ -152,3 +152,12 @@ if cfg.Redis.Host != "" {
 // Expose Prometheus metrics
 metrics.RegisterCollectors(prometheus.DefaultRegisterer)
 r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
+log.Printf("Starting auth service on %s", addr)
+if err := r.Run(addr); err != nil {
+	log.Fatalf("server failed: %v", err)
+}
+}
+
+var startTime = time.Now()
