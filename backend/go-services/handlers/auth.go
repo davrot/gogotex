@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
 	"github.com/gogotex/gogotex/backend/go-services/internal/tokens"
 	"github.com/gogotex/gogotex/backend/go-services/internal/users"
-)
+}
 
 // LoginRequest used for password-mode login (dev/testing)
 type LoginRequest struct {
