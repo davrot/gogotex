@@ -15,6 +15,11 @@ services:
     depends_on:
       keycloak-postgres:
         condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=Host(`keycloak.local`)"
+      - "traefik.http.routers.keycloak.entrypoints=web"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
 
 ###########
 # MONGODB #
@@ -116,6 +121,11 @@ services:
     extends:
       file: ./auth-service/auth.yaml
       service: gogotex-auth
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gogotex-auth.rule=Host(`auth.local`)"
+      - "traefik.http.routers.gogotex-auth.entrypoints=web"
+      - "traefik.http.services.gogotex-auth.loadbalancer.server.port=8081"
 
 #########
 # nginx #
@@ -135,6 +145,20 @@ services:
         condition: service_healthy
       redis-commander:
         condition: service_healthy
+
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+    ports:
+      - "127.0.0.1:8082:80"   # Traefik HTTP on host:8082 (does not conflict with nginx)
+      - "127.0.0.1:8083:8080" # Traefik dashboard (insecure)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+    networks:
+      - tex-network
 
 networks:
   tex-network:
