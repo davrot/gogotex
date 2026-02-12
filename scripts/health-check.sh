@@ -5,15 +5,6 @@ set -euo pipefail
 # Basic infrastructure health checks for Phase 1
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-# If not already running inside the helper Docker runner, re-exec this script
-# inside an Ubuntu container attached to the `tex-network` so internal container
-# hostnames (e.g. keycloak-keycloak, mongodb-mongodb) resolve reliably.
-if [ "${HEALTH_CHECK_IN_DOCKER:-}" != "1" ]; then
-  echo "Re-running health checks inside ephemeral Ubuntu container on network 'tex-network'..."
-  docker run --rm -v "$ROOT_DIR":"$ROOT_DIR" -w "$ROOT_DIR" -v /var/run/docker.sock:/var/run/docker.sock --network tex-network ubuntu:24.04 \
-    bash -lc "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null; apt-get install -y -qq docker.io curl jq bash >/dev/null; HEALTH_CHECK_IN_DOCKER=1 bash '$ROOT_DIR/scripts/health-check.sh' \"$@\""
-  exit $?
-fi
 
 SUPPORT_DIR="$ROOT_DIR/gogotex-support-services"
 KEYCLOAK_SECRET_FILE="$SUPPORT_DIR/keycloak-service/client-secret_gogotex-backend.txt"
@@ -46,17 +37,20 @@ CONTAINERS=$(docker ps --format '{{.Names}}')
 
 # helper to find a container by regex (prefers common service names)
 find_container() {
-  echo "$CONTAINERS" | grep -E "$1" | grep -v -E "exporter|healthcheck" | head -n1 || true
+  # Prefer exact/full-name matches first, then fallback to the first partial match.
+  # This avoids selecting exporter/auxiliary containers (e.g. mongodb-express)
+  echo "$CONTAINERS" | grep -xE "$1" | head -n1 || \
+    echo "$CONTAINERS" | grep -E "$1" | grep -v -E "exporter|healthcheck" | head -n1 || true
 }
 
 # Detect the actual container names (fallback to sensible defaults)
-KEYCLOAK_C=$(find_container "(^keycloak-keycloak$|keycloak|gogotex-keycloak")
-MONGO_C=$(find_container "(^mongodb-mongodb$|mongo|mongodb)")
-REDIS_C=$(find_container "(^redis-redis$|redis)")
-MINIO_C=$(find_container "(^minio-minio$|minio)")
-PROM_C=$(find_container "(^grafana-prometheus$|prometheus|prom)")
-GRAF_C=$(find_container "(^grafana-grafana$|grafana)")
-NGINX_C=$(find_container "(^nginx-nginx$|nginx)")
+KEYCLOAK_C=$(find_container '(^keycloak-keycloak$|keycloak|gogotex-keycloak)')
+MONGO_C=$(find_container '(^mongodb-mongodb$|mongo|mongodb)')
+REDIS_C=$(find_container '(^redis-redis$|redis)')
+MINIO_C=$(find_container '(^minio-minio$|minio)')
+PROM_C=$(find_container '(^grafana-prometheus$|prometheus|prom)')
+GRAF_C=$(find_container '(^grafana-grafana$|grafana)')
+NGINX_C=$(find_container '(^nginx-nginx$|nginx)')
 
 # Fallback values (used by standalone sub-scripts if detection fails)
 KEYCLOAK_C=${KEYCLOAK_C:-keycloak-keycloak}
