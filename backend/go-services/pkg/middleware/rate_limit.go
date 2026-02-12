@@ -60,7 +60,3 @@ func RateLimitMiddleware(rps float64, burst int) gin.HandlerFunc {
 		c.Next()
 	}
 }
-
-		c.Next()
-	}
-}
