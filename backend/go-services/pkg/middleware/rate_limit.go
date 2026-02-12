@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
+	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
 )
 
 // per-key limiter store (simple in-memory token-bucket)
@@ -50,9 +51,10 @@ func RateLimitMiddleware(rps float64, burst int) gin.HandlerFunc {
 		if !lim.Allow() {
 			// set common rate limit headers (informational)
 			c.Header("Retry-After", "1")
-			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
-			return
-		}
-		c.Next()
+		// record metric and reject
+		metrics.RateLimitRejected.WithLabelValues("memory").Inc()
+		c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
+		return
 	}
-}
+	// record allowed
+	metrics.RateLimitAllowed.WithLabelValues("memory").Inc()

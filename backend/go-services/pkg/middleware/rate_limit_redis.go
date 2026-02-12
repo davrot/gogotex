@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
 )
 
 // RedisRateLimitMiddleware provides a coarse fixed-window Redis-backed limiter.
@@ -55,9 +56,13 @@ func RedisRateLimitMiddleware(client *redis.Client, rps float64, burst int, wind
 		}
 		if int(cnt) > allowedPerWindow {
 			c.Header("Retry-After", fmt.Sprintf("%d", windowSeconds))
+			// metric: redis rejected
+			metrics.RateLimitRejected.WithLabelValues("redis").Inc()
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Rate limit exceeded"})
 			return
 		}
+		// metric: redis allowed
+		metrics.RateLimitAllowed.WithLabelValues("redis").Inc()
 		c.Next()
 	}
 }

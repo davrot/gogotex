@@ -10,6 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gogotex/gogotex/backend/go-services/internal/config"
 	"github.com/gogotex/gogotex/backend/go-services/internal/oidc"
+	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"strings"
 	"os"
 	"github.com/gogotex/gogotex/backend/go-services/internal/database"
@@ -146,17 +149,6 @@ if cfg.Redis.Host != "" {
 		})
 	}
 
-	// Register auth handlers if sessions/service available
-	if sessionsSvc != nil && userSvc != nil {
-		authHandler := handlers.NewAuthHandler(cfg, userSvc, sessionsSvc)
-		authHandler.Register(api)
-	}
-
-	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
-	log.Printf("Starting auth service on %s", addr)
-	if err := r.Run(addr); err != nil {
-		log.Fatalf("server failed: %v", err)
-	}
-}
-
-var startTime = time.Now()
+// Expose Prometheus metrics
+metrics.RegisterCollectors(prometheus.DefaultRegisterer)
+r.GET("/metrics", gin.WrapH(promhttp.Handler()))

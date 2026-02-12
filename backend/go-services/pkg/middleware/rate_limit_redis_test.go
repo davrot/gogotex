@@ -41,4 +41,8 @@ func TestRedisRateLimitMiddleware_Basic(t *testing.T) {
 	w3 := httptest.NewRecorder()
 	r.ServeHTTP(w3, rq3)
 	require.Equal(t, http.StatusOK, w3.Code)
+
+	// verify redis limiter metrics
+	require.Equal(t, 1.0, testutil.ToFloat64(metrics.RateLimitAllowed.WithLabelValues("redis")))
+	require.Equal(t, 1.0, testutil.ToFloat64(metrics.RateLimitRejected.WithLabelValues("redis")))
 }
