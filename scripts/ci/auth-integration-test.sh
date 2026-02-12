@@ -150,6 +150,8 @@ else
     "$AUTH_IMAGE"; then
     echo "ERROR: failed to start auth container"; exit 5
   fi
+  # Mark that we created a fresh integration container (use localhost:8081)
+  CREATED_AUTH_CONTAINER=true
 
   # debug: expose started container id + IP (helps when DNS lookup fails)
   CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
@@ -165,7 +167,8 @@ fi
 # 1) If reusing a long-running `gogotex-auth` -> use host-mapped localhost:8081.
 # 2) Otherwise prefer the container's network IP (avoids DNS timing issues).
 # 3) Fallback to container name when IP is not available.
-if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
+if [ "${CREATED_AUTH_CONTAINER:-false}" = "true" ] || [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
+  # prefer localhost when we created the container or when reusing a long-running one
   AUTH_HOST="localhost:8081"
 else
   # try to resolve container ID and inspect its network IP on $NET
