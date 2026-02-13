@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	documenthandler "github.com/gogotex/gogotex/backend/go-services/internal/document/handler"
+	documentservice "github.com/gogotex/gogotex/backend/go-services/internal/document/service"
 )
 
 // Document is a lightweight in-memory document model used for Phase-03 UI flows.
@@ -55,6 +57,17 @@ var (
 // RegisterDocumentRoutes registers minimal document endpoints used by the
 // Phase-03 frontend prototype (create, get, update).
 func RegisterDocumentRoutes(r *gin.Engine) {
+	// Opt-in: if DOC_SERVICE_INLINE=true then register the internal document
+	// service handlers (persistent memory/Mongo-backed) instead of the
+	// Phase‑03 in-memory prototype. This lets CI/dev run a persisted
+	// document service in-process without launching a separate container.
+	if os.Getenv("DOC_SERVICE_INLINE") == "true" {
+		// prefer Mongo-backed repo when MONGODB_URI present (internal/service handles fallback)
+		svc := documentservice.NewMemoryService()
+		documenthandler.RegisterDocumentRoutes(r, svc)
+		return
+	}
+
 	// List documents (lightweight)
 	r.GET("/api/documents", ListDocuments)
 	r.POST("/api/documents", CreateDocument)
@@ -389,6 +402,8 @@ func runCompileJob(j *CompileJob, content string, _name string) {
 	// run pdflatex with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
+
+	// Try to run pdflatex locally first
 	cmd := exec.CommandContext(ctx, "pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-synctex=1", "-output-directory", dir, "main.tex")
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()
@@ -403,22 +418,36 @@ func runCompileJob(j *CompileJob, content string, _name string) {
 	}
 	compileJobsMu.Unlock()
 
-	if err == nil {
-		// read produced PDF and synctex if present
-		pdfPath := filepath.Join(dir, "main.pdf")
-		if pb, rerr := os.ReadFile(pdfPath); rerr == nil {
-			compileJobsMu.Lock()
-			j.PDF = pb
-			// attempt to read synctex.gz
-			if sb, serr := os.ReadFile(filepath.Join(dir, "main.synctex.gz")); serr == nil {
-				j.Synctex = sb
+	// If local pdflatex not found or failed, and DOCKER_TEX_IMAGE is set, try docker run
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			// likely pdflatex not found — try docker-based runner when configured
+			dockerImage := os.Getenv("DOCKER_TEX_IMAGE")
+			if dockerImage != "" {
+				dockerCmd := exec.CommandContext(ctx, "docker", "run", "--rm", "-v", fmt.Sprintf("%s:/work", dir), "-w", "/work", dockerImage, "pdflatex", "-interaction=nonstopmode", "-halt-on-error", "-synctex=1", "main.tex")
+				dout, derr := dockerCmd.CombinedOutput()
+				compileJobsMu.Lock()
+				j.Logs += string(dout)
+				compileJobsMu.Unlock()
+				if derr == nil {
+					// attempt to read produced files
+					if pb, rerr := os.ReadFile(filepath.Join(dir, "main.pdf")); rerr == nil {
+						compileJobsMu.Lock()
+						j.PDF = pb
+						if sb, serr := os.ReadFile(filepath.Join(dir, "main.synctex.gz")); serr == nil {
+							j.Synctex = sb
+						}
+						j.Status = "ready"
+						compileJobsMu.Unlock()
+						return
+					}
+				}
 			}
-			j.Status = "ready"
-			compileJobsMu.Unlock()
-			return
 		}
-		// fallthrough to fallback when file missing
 	}
+
+	// If we reached here either pdflatex failed or output missing — fallback to minimal PDF + gzipped SyncTeX
+
 
 	// fallback (pdflatex missing or failed) — produce minimal PDF + gzipped SyncTeX
 	compileJobsMu.Lock()

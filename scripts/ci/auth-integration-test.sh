@@ -255,6 +255,7 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
       -e MONGODB_DATABASE=gogotex \
       -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
       -e REDIS_HOST=redis-redis -e REDIS_PORT=6379 -e RATE_LIMIT_USE_REDIS=true \
+      -e DOC_SERVICE_INLINE="${DOC_SERVICE_INLINE:-false}" \
       "$AUTH_IMAGE"; then
       echo "ERROR: failed to start auth container"; exit 5
     fi
