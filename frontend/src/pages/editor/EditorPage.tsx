@@ -253,11 +253,23 @@ export const EditorPage: React.FC = () => {
     const iv = setInterval(() => { void processSaveQueue() }, 3000)
     const onOnline = () => { void processSaveQueue() }
     window.addEventListener('online', onOnline)
+    // receive sync messages from preview iframe (synctex click)
+    const onMessage = (ev: MessageEvent) => {
+      try {
+        const d = ev.data || {}
+        if (d && d.type === 'synctex-click' && typeof d.line === 'number') {
+          editorRef.current?.goToLine(d.line)
+        }
+      } catch (e) { /* ignore */ }
+    }
+    window.addEventListener('message', onMessage)
+
     // try to process any existing queue on mount
     void processSaveQueue()
     return () => {
       clearInterval(iv)
       window.removeEventListener('online', onOnline)
+      window.removeEventListener('message', onMessage)
     }
   }, [docId])
 

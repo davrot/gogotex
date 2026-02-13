@@ -191,7 +191,8 @@ test.describe('Editor (Phase‑03)', () => {
         }
       })
       await page.route('**/api/documents/CREATED_DOC/preview', async (route) => {
-        await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>PDF preview (stub)</h1><p>CREATED_DOC</p></body></html>' })
+        await route.fulfill({ status: 200, contentType: 'text/html', body: `<!doctype html><html><head><meta charset="utf-8"><title>Preview</title>
+<script>function sendLine(line){ parent.postMessage({ type: 'synctex-click', line: line }, '*') }</n/ script></head><body><h1>PDF preview (stub)</h1><div id="pdf" style="height:300px;overflow:auto;border:1px solid #ddd;padding:8px;"><p data-line="1">Top (line 1)</p><p data-line="5">Middle (line 5)</p><p data-line="10">Bottom (line 10)</p></div><script>document.getElementById('pdf').addEventListener('click', function(e){ var t = e.target; var line = t.dataset && t.dataset.line ? Number(t.dataset.line) : 1; parent.postMessage({type:'synctex-click', line: line}, '*') })</script></body></html>` })
       })
 
       // respond to SyncTeX download (gzipped stub)

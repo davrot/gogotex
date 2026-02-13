@@ -19,6 +19,7 @@ export type EditorHandle = {
   insertText: (text: string) => void
   replaceSelection: (text: string) => void
   getValue: () => string
+  goToLine: (line: number) => void
 }
 
 export const Editor = forwardRef<EditorHandle, EditorProps>(({ initialValue = '', onChange, language = 'latex' }, ref) => {
@@ -51,6 +52,12 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ initialValue = ''
         const val = v.state.doc.toString()
         onChange?.(val)
         try { localStorage.setItem('gogotex.editor.content', val) } catch (e) { /* ignore */ }
+      }
+      if (v.selectionSet) {
+        try {
+          const line = v.state.doc.lineAt(v.state.selection.main.from).number
+          localStorage.setItem('gogotex.editor.caretLine', String(line))
+        } catch (e) { /* ignore */ }
       }
     }))
 
@@ -85,7 +92,16 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ initialValue = ''
       v.dispatch(v.state.update({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } }))
       v.focus()
     },
-    getValue: () => viewRef.current?.state.doc.toString() || ''
+    getValue: () => viewRef.current?.state.doc.toString() || '',
+    goToLine: (line: number) => {
+      const v = viewRef.current
+      if (!v) return
+      const max = v.state.doc.lines
+      const target = Math.max(1, Math.min(line, max))
+      const pos = v.state.doc.line(target).from
+      v.dispatch(v.state.update({ selection: { anchor: pos }, scrollIntoView: true }))
+      v.focus()
+    }
   }))
 
   return <div className="cm-editor" ref={host} style={{minHeight: 320, border: '1px solid var(--color-border)'}} />
