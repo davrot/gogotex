@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -268,4 +269,47 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	assert.Equal(t, float64(1), lookup2["page"])
 	expectedY := (5.0 - 0.5) / 10.0
 	assert.InDelta(t, expectedY, lookup2["y"].(float64), 0.01)
+}
+
+func TestParseSynctexGzipFallback(t *testing.T) {
+	g := gin.New()
+	RegisterDocumentRoutes(g)
+
+	// create a document
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/documents", strings.NewReader(`{"name":"s.tex","content":"line1\nline2\nline3\nline4\nline5\n"}`))
+	req.Header.Set("Content-Type", "application/json")
+	g.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+	var cr map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &cr)
+	require.NoError(t, err)
+	id := cr["id"]
+
+	// create a fake ready compile job that contains a gzipped SyncTeX with parseable entries
+	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	// embed simple parseable patterns that our parser recognizes
+	gw.Write([]byte("SyncTeX Version:1\nInput:main.tex\npage:1 line:1 y:0.05\npage:1 line:5 y:0.45\n"))
+	gw.Close()
+	job := &CompileJob{JobID: jobID, DocID: id, Status: "ready", Logs: "ok", CreatedAt: time.Now(), Synctex: buf.Bytes(), PDF: minimalPDF()}
+	compileJobsMu.Lock()
+	compileJobs[jobID] = job
+	compileJobsMu.Unlock()
+
+	// request synctex map -> should parse and return entries
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex/map", id, jobID), nil)
+	g.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	pages := resp["pages"].(map[string]interface{})
+	p1 := pages["1"].([]interface{})
+	require.Equal(t, 2, len(p1))
+	first := p1[0].(map[string]interface{})
+	require.InDelta(t, 0.05, first["y"].(float64), 1e-6)
+	require.Equal(t, float64(1), first["line"].(float64))
 }

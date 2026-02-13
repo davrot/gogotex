@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"math"
 
 	"github.com/gin-gonic/gin"
 	documenthandler "github.com/gogotex/gogotex/backend/go-services/internal/document/handler"
@@ -560,13 +561,16 @@ func GetSyncTeXLookup(c *gin.Context) {
 			}
 		}
 		// not found in map -> fall back to nearest match across all pages
-		bestP, bestY := 1, 0.5
+		bestP := 1
+		bestY := 0.5
+		bestLine := 0
 		found := false
 		for p, arr := range job.SynctexMap {
 			for _, e := range arr {
-				if !found || absFloat(e.Line-ln) < absFloat(bestYInt(bestP, bestY)-ln) {
+				if !found || math.Abs(float64(e.Line-ln)) < math.Abs(float64(bestLine-ln)) {
 					bestP = p
 					bestY = e.Y
+					bestLine = e.Line
 					found = true
 				}
 			}
@@ -618,6 +622,44 @@ func GetSyncTeXLookup(c *gin.Context) {
 	if y < 0 { y = 0 }
 	if y > 1 { y = 1 }
 	c.JSON(http.StatusOK, gin.H{"page": 1, "y": y, "line": ln})
+}
+
+// parseSynctexMapFromGzip attempts to extract simple page->(y,line) mappings
+// from a gzipped SyncTeX payload. This is best-effort and accepts a few
+// common textual patterns; if nothing useful is found an error is returned.
+func parseSynctexMapFromGzip(gz []byte) (map[int][]SyncEntry, error) {
+	gr, err := gzip.NewReader(bytes.NewReader(gz))
+	if err != nil {
+		return nil, err
+	}
+	defer gr.Close()
+	b, err := io.ReadAll(gr)
+	if err != nil {
+		return nil, err
+	}
+	s := string(b)
+
+	// pattern: page:<p> line:<n> y:<float>
+	re := regexp.MustCompile(`(?i)page[:=]\s*(\d+)\s+line[:=]\s*(\d+)\s+y[:=]\s*([0-9]*\.?[0-9]+)`) 
+	matches := re.FindAllStringSubmatch(s, -1)
+	if len(matches) == 0 {
+		// try a looser pattern: "line <n>.*page <p>.*y=<float>" in arbitrary order
+		re2 := regexp.MustCompile(`(?i)line\s*(\d+).*?page\s*(\d+).*?y[:=]\s*([0-9]*\.?[0-9]+)`) 
+		matches = re2.FindAllStringSubmatch(s, -1)
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no synctex map patterns found")
+	}
+	out := map[int][]SyncEntry{}
+	for _, m := range matches {
+		p, _ := strconv.Atoi(m[1])
+		ln, _ := strconv.Atoi(m[2])
+		y, _ := strconv.ParseFloat(m[3], 64)
+		if y < 0 { y = 0 }
+		if y > 1 { y = 1 }
+		out[p] = append(out[p], SyncEntry{Y: y, Line: ln})
+	}
+	return out, nil
 }
 
 // splitLines is like strings.Split(..."\n") but treats trailing newline sensibly
@@ -723,9 +765,13 @@ func runCompileJob(j *CompileJob, content string, _name string) {
 	j.PDF = minimalPDF()
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
-	gw.Write([]byte("SyncTeX Version:1\nInput:main.tex\nOutput:main.pdf\n"))
+	gw.Write([]byte("SyncTeX Version:1\nInput:main.tex\nOutput:main.pdf\npage:1 line:1 y:0.5\n"))
 	gw.Close()
 	j.Synctex = buf.Bytes()
+	// attempt to parse SyncTeX gzip into a best-effort map so front-end can use it immediately
+	if sm, perr := parseSynctexMapFromGzip(j.Synctex); perr == nil && len(sm) > 0 {
+		j.SynctexMap = sm
+	}
 	j.Status = "ready"
 	compileJobsMu.Unlock()
 }
