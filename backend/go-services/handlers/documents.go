@@ -29,9 +29,22 @@ var (
 // RegisterDocumentRoutes registers minimal document endpoints used by the
 // Phase-03 frontend prototype (create, get, update).
 func RegisterDocumentRoutes(r *gin.Engine) {
+	// List documents (lightweight)
+	r.GET("/api/documents", ListDocuments)
 	r.POST("/api/documents", CreateDocument)
 	r.GET("/api/documents/:id", GetDocument)
 	r.PATCH("/api/documents/:id", UpdateDocument)
+}
+
+// ListDocuments returns a short listing of available documents (id + name)
+func ListDocuments(c *gin.Context) {
+	documentsMu.RLock()
+	defer documentsMu.RUnlock()
+	out := make([]map[string]string, 0, len(documentsStore))
+	for id, d := range documentsStore {
+		out = append(out, map[string]string{"id": id, "name": d.Name})
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // CreateDocument accepts { name, content } and returns { id, name }

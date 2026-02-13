@@ -38,7 +38,7 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	g.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// GET
+	// GET (single)
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s", id), nil)
 	g.ServeHTTP(w, req)
@@ -47,4 +47,20 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	err = json.Unmarshal(w.Body.Bytes(), &got)
 	require.NoError(t, err)
 	assert.Equal(t, "updated content", got["content"])
+
+	// LIST
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/documents", nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var list []map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &list)
+	require.NoError(t, err)
+	found := false
+	for _, it := range list {
+		if idv, ok := it["id"].(string); ok && idv == id {
+			found = true
+		}
+	}
+	assert.True(t, found, "created document should appear in list")
 }
