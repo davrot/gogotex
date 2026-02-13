@@ -177,20 +177,32 @@ test.describe('Editor (Phase‑03)', () => {
       expect(patchCalls).toBeGreaterThanOrEqual(2)
       expect(sawPatch).toBeTruthy()
 
-      // mock compile + preview responses for CREATED_DOC
+      // mock compile + preview + logs for CREATED_DOC (simulate async logs)
       await page.route('**/api/documents/CREATED_DOC/compile', async (route) => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: 'job123', status: 'queued', previewUrl: '/api/documents/CREATED_DOC/preview' }) })
+      })
+      let logCalls = 0
+      await page.route('**/api/documents/CREATED_DOC/compile/logs', async (route) => {
+        logCalls += 1
+        if (logCalls < 2) {
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: 'job123', status: 'compiling', logs: 'Compiling... 10%' }) })
+        } else {
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: 'job123', status: 'ready', logs: 'Compiled successfully', previewUrl: '/api/documents/CREATED_DOC/preview' }) })
+        }
       })
       await page.route('**/api/documents/CREATED_DOC/preview', async (route) => {
         await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>PDF preview (stub)</h1><p>CREATED_DOC</p></body></html>' })
       })
 
-      // click Compile -> should show compiling then preview iframe
+      // click Compile -> should show compiling + logs, then iframe appears
       await page.click('button:has-text("Compile")')
-      await page.waitForTimeout(300)
-      await expect(page.locator('.save-indicator, .editor-status')).toBeVisible()
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(200)
+      await expect(page.locator('text=Compiling...')).toBeVisible()
+      await expect(page.locator('pre')).toContainText('Compiling')
+      // after poll completes iframe should show preview and logs updated
+      await page.waitForTimeout(600)
       await expect(page.frameLocator('iframe[title="preview"]').locator('text=PDF preview (stub)')).toBeVisible()
+      await expect(page.locator('pre')).toContainText('Compiled successfully')
     } else {
       // Fallback: exercise autosave logic directly
       await page.evaluate(() => { try { localStorage.setItem('gogotex.editor.content', '\\documentclass{article}\\\n') } catch (e) {} })

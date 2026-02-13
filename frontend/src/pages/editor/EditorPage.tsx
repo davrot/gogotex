@@ -49,6 +49,7 @@ export const EditorPage: React.FC = () => {
   // Compile state
   const [compileStatus, setCompileStatus] = useState<'idle'|'compiling'|'ready'|'error'>('idle')
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null)
+  const [compileLogs, setCompileLogs] = useState<string | null>(null)
 
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
 
@@ -153,22 +154,47 @@ export const EditorPage: React.FC = () => {
       return
     }
     setCompileStatus('compiling')
+    setCompileLogs(null)
     try {
       const svc = await import('../../services/editorService')
-      const res = await svc.editorService.compileDocument(id)
-      const preview = res && (res.previewUrl || res.pdfUrl)
-      if (preview) {
-        setCompilePreviewUrl(preview)
-        setCompileStatus('ready')
-      } else {
-        setCompileStatus('error')
+      const job = await svc.editorService.compileDocument(id)
+      // poll compile logs/status until ready or canceled
+      for (let i = 0; i < 40; i++) {
+        const s = await svc.editorService.getCompileLogs(id)
+        setCompileLogs((s && (s.logs || '')) || null)
+        if (s && s.status === 'ready') {
+          setCompilePreviewUrl(s.previewUrl || `/api/documents/${id}/preview`)
+          setCompileStatus('ready')
+          return
+        }
+        if (s && s.status === 'canceled') {
+          setCompileStatus('error')
+          return
+        }
+        // wait a bit and poll again
+        await new Promise(r => setTimeout(r, 200))
       }
+      // timeout
+      setCompileStatus('error')
     } catch (e) {
       console.warn('compileDocument failed', e)
       setCompileStatus('error')
     }
-    // clear status after short delay
-    setTimeout(() => { if (compileStatus !== 'ready') setCompileStatus('idle') }, 4000)
+  }
+
+  const cancelCompile = async () => {
+    const id = docId || (typeof window !== 'undefined' ? localStorage.getItem('gogotex.editor.docId') : null)
+    if (!id) return
+    try {
+      const svc = await import('../../services/editorService')
+      await svc.editorService.cancelCompile(id)
+      const s = await svc.editorService.getCompileLogs(id)
+      setCompileLogs((s && (s.logs || '')) || null)
+      setCompileStatus('error')
+    } catch (e) {
+      console.warn('cancelCompile failed', e)
+      setCompileStatus('error')
+    }
   }
 
   const attachExisting = (id?: string) => {
@@ -281,12 +307,20 @@ export const EditorPage: React.FC = () => {
       <div style={{marginTop:12}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button className="btn btn-primary" onClick={() => void compileDocument()}>Compile</button>
+          {compileStatus === 'compiling' && (
+            <button className="btn btn-ghost" onClick={() => void cancelCompile()}>Cancel</button>
+          )}
           <div style={{fontSize:12,color:'#6b7280'}}>
             {compileStatus === 'compiling' && 'Compiling...'}
             {compileStatus === 'ready' && 'Preview ready'}
             {compileStatus === 'error' && 'Compile failed'}
           </div>
         </div>
+        {compileLogs && (
+          <div style={{marginTop:8,background:'#0b1220',color:'#d1d5db',padding:8,borderRadius:6,fontSize:12}}>
+            <pre style={{margin:0,whiteSpace:'pre-wrap'}}>{compileLogs}</pre>
+          </div>
+        )}
         {compilePreviewUrl && (
           <div style={{marginTop:8,border:'1px solid var(--color-border)',height:360}}>
             <iframe title="preview" src={compilePreviewUrl} style={{width:'100%',height:'100%',border:0}} />

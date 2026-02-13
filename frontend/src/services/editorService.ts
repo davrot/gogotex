@@ -67,6 +67,27 @@ export const editorService = {
     }
     return res.json()
   },
+
+  async getCompileLogs(docId: string) {
+    if (!docId) throw new Error('docId required')
+    const res = await authService.apiFetch(`/api/documents/${docId}/compile/logs`)
+    if (!res.ok) {
+      const t = await res.text()
+      throw new Error(`getCompileLogs failed: ${res.status} ${t}`)
+    }
+    return res.json()
+  },
+
+  async cancelCompile(docId: string) {
+    if (!docId) throw new Error('docId required')
+    const res = await authService.apiFetch(`/api/documents/${docId}/compile/cancel`, { method: 'POST' })
+    if (!res.ok) {
+      const t = await res.text()
+      throw new Error(`cancelCompile failed: ${res.status} ${t}`)
+    }
+    return res.json()
+  },
+}
 }
 
 }

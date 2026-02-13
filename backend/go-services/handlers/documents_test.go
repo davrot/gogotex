@@ -85,7 +85,7 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	}
 	assert.False(t, found, "deleted document should not appear in list")
 
-	// COMPILE (stub) -> returns previewUrl
+	// COMPILE (stub) -> returns job and becomes ready shortly after
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/documents/%s/compile", id), nil)
 	g.ServeHTTP(w, req)
@@ -93,7 +93,30 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	var comp map[string]interface{}
 	err = json.Unmarshal(w.Body.Bytes(), &comp)
 	require.NoError(t, err)
-	require.Contains(t, comp, "previewUrl")
+	jobID, ok := comp["jobId"].(string)
+	require.True(t, ok)
+
+	// Poll logs until ready (with timeout)
+	var logsResp map[string]interface{}
+	ready := false
+	for i := 0; i < 20; i++ {
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/logs", id), nil)
+		g.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			time.Sleep(25 * time.Millisecond)
+			continue
+		}
+		err = json.Unmarshal(w.Body.Bytes(), &logsResp)
+		require.NoError(t, err)
+		if s, _ := logsResp["status"].(string); s == "ready" {
+			ready = true
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	require.True(t, ready, "compile job did not reach ready state")
+	require.Contains(t, logsResp["logs"].(string), "Compiled successfully")
 
 	// PREVIEW -> HTML content
 	w = httptest.NewRecorder()
@@ -102,4 +125,27 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 	assert.Contains(t, body, "PDF preview (stub)")
+
+	// Start another compile then cancel it immediately
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/documents/%s/compile", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// cancel
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/documents/%s/compile/cancel", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// logs should indicate canceled
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/logs", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var logs2 map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &logs2)
+	require.NoError(t, err)
+	assert.Equal(t, "canceled", logs2["status"])
+	assert.Contains(t, logs2["logs"].(string), "Canceled")
 }

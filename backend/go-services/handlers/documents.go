@@ -21,9 +21,22 @@ type Document struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// CompileJob represents a short-lived compile job for Phase‑03 prototyping.
+type CompileJob struct {
+	JobID     string    `json:"jobId"`
+	DocID     string    `json:"docId"`
+	Status    string    `json:"status"` // compiling|ready|canceled|error
+	Logs      string    `json:"logs"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 var (
 	documentsMu    sync.RWMutex
 	documentsStore = map[string]*Document{}
+
+	// jobs map for compile stubs
+	compileJobsMu sync.RWMutex
+	compileJobs   = map[string]*CompileJob{}
 )
 
 // RegisterDocumentRoutes registers minimal document endpoints used by the
@@ -38,8 +51,10 @@ func RegisterDocumentRoutes(r *gin.Engine) {
 
 	// compile & preview (Phase‑03 stub)
 	r.POST("/api/documents/:id/compile", CompileDocument)
+	r.GET("/api/documents/:id/compile/logs", GetCompileLogs)
+	r.POST("/api/documents/:id/compile/cancel", CancelCompile)
 	r.GET("/api/documents/:id/preview", PreviewDocument)
-}
+} 
 
 // ListDocuments returns a short listing of available documents (id + name)
 func ListDocuments(c *gin.Context) {
@@ -126,6 +141,7 @@ func DeleteDocument(c *gin.Context) {
 }
 
 // CompileDocument is a Phase‑03 stub that 'queues' a compile job and returns a preview URL.
+// It simulates an async compile by creating an in-memory job and completing it shortly after.
 func CompileDocument(c *gin.Context) {
 	id := c.Param("id")
 	documentsMu.RLock()
@@ -135,10 +151,27 @@ func CompileDocument(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	// Return a preview URL pointing to the preview endpoint below. In Phase‑06 this
-	// will schedule an actual compile job and return job metadata.
+	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
+	job := &CompileJob{JobID: jobID, DocID: id, Status: "compiling", Logs: "Started compile...\n", CreatedAt: time.Now()}
+	compileJobsMu.Lock()
+	compileJobs[jobID] = job
+	compileJobsMu.Unlock()
+
+	// Simulate async compile completion after a short delay (keeps tests fast)
+	go func(j *CompileJob) {
+		time.Sleep(150 * time.Millisecond)
+		compileJobsMu.Lock()
+		defer compileJobsMu.Unlock()
+		if cur, ok := compileJobs[j.JobID]; ok {
+			if cur.Status != "canceled" {
+				cur.Status = "ready"
+				cur.Logs += "Compiled successfully\n"
+			}
+		}
+	}(job)
+
 	preview := fmt.Sprintf("/api/documents/%s/preview", id)
-	c.JSON(http.StatusOK, gin.H{"jobId": fmt.Sprintf("job_%d", time.Now().UnixNano()), "status": "queued", "previewUrl": preview, "name": d.Name})
+	c.JSON(http.StatusOK, gin.H{"jobId": jobID, "status": job.Status, "previewUrl": preview, "name": d.Name})
 }
 
 // PreviewDocument returns a lightweight HTML preview (stub) for the given document.
@@ -154,4 +187,34 @@ func PreviewDocument(c *gin.Context) {
 	html := fmt.Sprintf(`<html><head><meta charset="utf-8"><title>Preview: %s</title></head><body><h2>PDF preview (stub)</h2><p>Document: <strong>%s</strong> (%s)</p><p>This is a placeholder preview for Phase‑03.</p></body></html>`, d.Name, d.Name, d.ID)
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(http.StatusOK, html)
+}
+
+// GetCompileLogs returns the current compile job status and logs for a document (Phase‑03).
+func GetCompileLogs(c *gin.Context) {
+	id := c.Param("id")
+	compileJobsMu.RLock()
+	defer compileJobsMu.RUnlock()
+	for _, j := range compileJobs {
+		if j.DocID == id {
+			c.JSON(http.StatusOK, gin.H{"jobId": j.JobID, "status": j.Status, "logs": j.Logs, "previewUrl": fmt.Sprintf("/api/documents/%s/preview", id)})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "no compile job"})
+}
+
+// CancelCompile attempts to cancel a running compile job for a document.
+func CancelCompile(c *gin.Context) {
+	id := c.Param("id")
+	compileJobsMu.Lock()
+	defer compileJobsMu.Unlock()
+	for _, j := range compileJobs {
+		if j.DocID == id && j.Status == "compiling" {
+			j.Status = "canceled"
+			j.Logs += "Canceled by user\n"
+			c.JSON(http.StatusOK, gin.H{"jobId": j.JobID, "status": j.Status})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "no running compile job"})
 }
