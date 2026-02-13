@@ -9,7 +9,22 @@ export const EditorPage: React.FC = () => {
   // when content changes: persist locally (already done by Editor) and schedule server sync
   const onEditorChange = (v: string) => {
     setValue(v)
+    try { localStorage.setItem('gogotex.editor.content', v) } catch (e) {}
     scheduleSync(v)
+  }
+
+  // Open a document from server into the editor
+  const openDocument = async (id: string) => {
+    try {
+      const svc = await import('../../services/editorService')
+      const doc = await svc.editorService.getDocument(id)
+      const content = (doc && doc.content) || ''
+      setValue(content)
+      try { localStorage.setItem('gogotex.editor.content', content); localStorage.setItem('gogotex.editor.docId', id) } catch (e) {}
+      setDocId(id)
+    } catch (e) {
+      console.warn('openDocument failed', e)
+    }
   }
 
   const insertBold = () => editorRef.current?.replaceSelection('\\textbf{bold}')
@@ -121,21 +136,37 @@ export const EditorPage: React.FC = () => {
         <button className="btn btn-secondary" style={{marginLeft:8}} onClick={() => { navigator.clipboard?.writeText(value) }}>Copy</button>
       </div>
 
-      <div style={{marginBottom:12, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <input placeholder="Document name" value={docName} onChange={(e) => setDocName(e.target.value)} style={{padding:'6px 8px',borderRadius:6,border:'1px solid var(--color-border)'}} />
-          <button className="btn" onClick={() => void createNewDocument()}>New document</button>
-          <input placeholder="Attach doc id" value={attachIdInput} onChange={(e) => setAttachIdInput(e.target.value)} style={{padding:'6px 8px',borderRadius:6,border:'1px solid var(--color-border)', marginLeft:8}} />
-          <button className="btn" onClick={() => attachExisting()}>Attach</button>
+      <div style={{display:'flex',gap:24,alignItems:'flex-start',marginBottom:12}}>
+        <div style={{width:220}}>
+          {/* Document list */}
+          <React.Suspense fallback={<div>Loading documents…</div>}>
+            <div style={{marginBottom:12}}>
+              {/* lazy-import to avoid bundle size when not used elsewhere */}
+              {/* DocumentList is in components/document/DocumentList.tsx */}
+            </div>
+            <div style={{background:'#fafafa',padding:8,borderRadius:6}}>
+              {/* Inline import to keep top-level bundle small */}
+              {React.createElement((require('../../components/document/DocumentList').default as any), { onOpen: openDocument })}
+            </div>
+          </React.Suspense>
         </div>
 
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <button className="btn" onClick={insertBold}>Bold</button>
-          <button className="btn" style={{marginLeft:8}} onClick={insertItalic}>Italic</button>
-          <button className="btn" style={{marginLeft:8}} onClick={insertSection}>Section</button>
-          <button className="btn" style={{marginLeft:8}} onClick={insertMath}>Math</button>
-          <button className="btn" style={{marginLeft:8}} onClick={insertTemplate}>Insert template</button>
-          <button className="btn btn-secondary" style={{marginLeft:8}} onClick={() => void syncToServer()}>{docId ? `Save to server (doc: ${docId})` : 'Save to server'}</button>
+        <div style={{flex:1}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+            <input placeholder="Document name" value={docName} onChange={(e) => setDocName(e.target.value)} style={{padding:'6px 8px',borderRadius:6,border:'1px solid var(--color-border)'}} />
+            <button className="btn" onClick={() => void createNewDocument()}>New document</button>
+            <input placeholder="Attach doc id" value={attachIdInput} onChange={(e) => setAttachIdInput(e.target.value)} style={{padding:'6px 8px',borderRadius:6,border:'1px solid var(--color-border)', marginLeft:8}} />
+            <button className="btn" onClick={() => attachExisting()}>Attach</button>
+
+            <div style={{marginLeft:'auto',display:'flex',gap:8}}>
+              <button className="btn" onClick={insertBold}>Bold</button>
+              <button className="btn" style={{marginLeft:8}} onClick={insertItalic}>Italic</button>
+              <button className="btn" style={{marginLeft:8}} onClick={insertSection}>Section</button>
+              <button className="btn" style={{marginLeft:8}} onClick={insertMath}>Math</button>
+              <button className="btn" style={{marginLeft:8}} onClick={insertTemplate}>Insert template</button>
+              <button className="btn btn-secondary" style={{marginLeft:8}} onClick={() => void syncToServer()}>{docId ? `Save to server (doc: ${docId})` : 'Save to server'}</button>
+            </div>
+          </div>
         </div>
       </div>
 

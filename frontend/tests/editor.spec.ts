@@ -31,13 +31,27 @@ test.describe('Editor (Phase‑03)', () => {
       } catch (e) { }
     })
 
-    // mock POST /api/documents to return a created id
+    // mock POST /api/documents and GET /api/documents to return test data
     let sawPost = false
     await page.route('**/api/documents', async (route) => {
       const req = route.request()
       if (req.method() === 'POST') {
         sawPost = true
-        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'CREATED_DOC' }) })
+        await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ id: 'CREATED_DOC', name: 'mydoc.tex' }) })
+        return
+      }
+      if (req.method() === 'GET') {
+        // return a small document list for DocumentList component
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([{ id: 'EX_DOC', name: 'existing.tex' }]) })
+        return
+      }
+      await route.continue()
+    })
+
+    // mock GET /api/documents/EX_DOC
+    await page.route('**/api/documents/EX_DOC', async (route) => {
+      if (route.request().method() === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'EX_DOC', name: 'existing.tex', content: '% existing document\n\\documentclass{article}\n' }) })
       } else {
         await route.continue()
       }
@@ -46,6 +60,12 @@ test.describe('Editor (Phase‑03)', () => {
     const editorPresent = await page.locator(editorSelector).count()
     if (editorPresent > 0) {
       await page.waitForSelector(editorSelector)
+
+      // open a document from DocumentList -> loads server content into editor
+      await page.click('button:has-text("existing.tex")')
+      await page.waitForTimeout(200)
+      const loaded = await page.evaluate(() => localStorage.getItem('gogotex.editor.content'))
+      expect(loaded).toContain('\\documentclass{article}')
 
       // click 'Insert template' toolbar button -> autosave to localStorage
       await page.click('button:has-text("Insert template")')
