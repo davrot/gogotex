@@ -51,7 +51,17 @@ export const EditorPage: React.FC = () => {
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null)
   const [compileLogs, setCompileLogs] = useState<string | null>(null)
 
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(() => {
+    try {
+      const v = typeof window !== 'undefined' ? localStorage.getItem('gogotex.editor.lastSavedAt') : null
+      return v ? parseInt(v, 10) : null
+    } catch (e) { return null }
+  })
+
+  const persistLastSaved = (ts: number | null) => {
+    setLastSavedAt(ts)
+    try { if (ts) localStorage.setItem('gogotex.editor.lastSavedAt', String(ts)) } catch (e) {}
+  }
 
   const saveQueueKey = 'gogotex.editor.saveQueue'
   const loadSaveQueue = (): Array<{ docId: string; content: string; ts: number }> => {
@@ -86,7 +96,7 @@ export const EditorPage: React.FC = () => {
         // success -> remove this item and continue
         const remaining = loadSaveQueue().filter(it => it.docId !== item.docId)
         persistSaveQueue(remaining)
-        setLastSavedAt(Date.now())
+        persistLastSaved(Date.now())
         setSaveStatus('saved')
       } catch (e) {
         console.warn('processSaveQueue: sync failed for', item.docId, e)
@@ -108,7 +118,7 @@ export const EditorPage: React.FC = () => {
     try {
       const svc = await import('../../services/editorService')
       await svc.editorService.syncDraft(id, content ?? value)
-      setLastSavedAt(Date.now())
+      persistLastSaved(Date.now())
       setSaveStatus('saved')
       return true
     } catch (e) {
