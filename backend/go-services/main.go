@@ -239,8 +239,8 @@ if userSvc != nil && sessionsSvc != nil {
 } else {
 	logger.Warnf("auth handlers not registered because user/sessions services are unavailable")
 }// Register minimal Swagger UI + JSON for API documentation (Phase-02 requirement)
-handlers.RegisterSwagger(r)
-logger.Infof("MAIN checkpoint: after registering handlers")
+handlers.RegisterSwagger(r)// Minimal documents API (Phase‑03): support editor create/attach + simple draft PATCH
+handlers.RegisterDocumentRoutes(r)logger.Infof("MAIN checkpoint: after registering handlers")
 	api := r.Group("/api/v1")
 	if verifier != nil {
 		api.GET("/me", middleware.AuthMiddleware(verifier), func(c *gin.Context) {
