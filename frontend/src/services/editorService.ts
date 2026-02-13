@@ -57,5 +57,17 @@ export const editorService = {
     }
     return true
   },
+
+  async compileDocument(docId: string) {
+    if (!docId) throw new Error('docId required')
+    const res = await authService.apiFetch(`/api/documents/${docId}/compile`, { method: 'POST' })
+    if (!res.ok) {
+      const t = await res.text()
+      throw new Error(`compileDocument failed: ${res.status} ${t}`)
+    }
+    return res.json()
+  },
+}
+
 }
 

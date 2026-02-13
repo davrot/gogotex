@@ -46,8 +46,10 @@ export const EditorPage: React.FC = () => {
   const [attachIdInput, setAttachIdInput] = useState<string>('')
   const [statusMsg, setStatusMsg] = useState<{ type: 'success'|'error'|'info', text: string } | null>(null)
 
-  // Save queue / status (persisted so reloads keep pending saves)
-  const [saveStatus, setSaveStatus] = useState<'idle'|'saving'|'saved'|'queued'|'error'>('idle')
+  // Compile state
+  const [compileStatus, setCompileStatus] = useState<'idle'|'compiling'|'ready'|'error'>('idle')
+  const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null)
+
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
 
   const saveQueueKey = 'gogotex.editor.saveQueue'
@@ -140,6 +142,33 @@ export const EditorPage: React.FC = () => {
       setTimeout(() => setStatusMsg(null), 3000)
       return false
     }
+  }
+
+  // Compile document (Phase‑03 stub)
+  const compileDocument = async () => {
+    const id = docId || (typeof window !== 'undefined' ? localStorage.getItem('gogotex.editor.docId') : null)
+    if (!id) {
+      setStatusMsg({ type: 'error', text: 'No document attached' })
+      setTimeout(() => setStatusMsg(null), 2000)
+      return
+    }
+    setCompileStatus('compiling')
+    try {
+      const svc = await import('../../services/editorService')
+      const res = await svc.editorService.compileDocument(id)
+      const preview = res && (res.previewUrl || res.pdfUrl)
+      if (preview) {
+        setCompilePreviewUrl(preview)
+        setCompileStatus('ready')
+      } else {
+        setCompileStatus('error')
+      }
+    } catch (e) {
+      console.warn('compileDocument failed', e)
+      setCompileStatus('error')
+    }
+    // clear status after short delay
+    setTimeout(() => { if (compileStatus !== 'ready') setCompileStatus('idle') }, 4000)
   }
 
   const attachExisting = (id?: string) => {
@@ -246,6 +275,23 @@ export const EditorPage: React.FC = () => {
 
       <div className="card">
         <Editor ref={editorRef} initialValue={value} onChange={onEditorChange} language="latex" onSave={() => void syncToServer()} />
+      </div>
+
+      {/* Compile preview area */}
+      <div style={{marginTop:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button className="btn btn-primary" onClick={() => void compileDocument()}>Compile</button>
+          <div style={{fontSize:12,color:'#6b7280'}}>
+            {compileStatus === 'compiling' && 'Compiling...'}
+            {compileStatus === 'ready' && 'Preview ready'}
+            {compileStatus === 'error' && 'Compile failed'}
+          </div>
+        </div>
+        {compilePreviewUrl && (
+          <div style={{marginTop:8,border:'1px solid var(--color-border)',height:360}}>
+            <iframe title="preview" src={compilePreviewUrl} style={{width:'100%',height:'100%',border:0}} />
+          </div>
+        )}
       </div>
     </div>
   )

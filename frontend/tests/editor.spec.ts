@@ -176,6 +176,21 @@ test.describe('Editor (Phase‑03)', () => {
       await expect(page.locator('.save-indicator')).toContainText('Saved')
       expect(patchCalls).toBeGreaterThanOrEqual(2)
       expect(sawPatch).toBeTruthy()
+
+      // mock compile + preview responses for CREATED_DOC
+      await page.route('**/api/documents/CREATED_DOC/compile', async (route) => {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ jobId: 'job123', status: 'queued', previewUrl: '/api/documents/CREATED_DOC/preview' }) })
+      })
+      await page.route('**/api/documents/CREATED_DOC/preview', async (route) => {
+        await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>PDF preview (stub)</h1><p>CREATED_DOC</p></body></html>' })
+      })
+
+      // click Compile -> should show compiling then preview iframe
+      await page.click('button:has-text("Compile")')
+      await page.waitForTimeout(300)
+      await expect(page.locator('.save-indicator, .editor-status')).toBeVisible()
+      await page.waitForTimeout(500)
+      await expect(page.frameLocator('iframe[title="preview"]').locator('text=PDF preview (stub)')).toBeVisible()
     } else {
       // Fallback: exercise autosave logic directly
       await page.evaluate(() => { try { localStorage.setItem('gogotex.editor.content', '\\documentclass{article}\\\n') } catch (e) {} })

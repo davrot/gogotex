@@ -84,4 +84,22 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 		}
 	}
 	assert.False(t, found, "deleted document should not appear in list")
+
+	// COMPILE (stub) -> returns previewUrl
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/documents/%s/compile", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var comp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &comp)
+	require.NoError(t, err)
+	require.Contains(t, comp, "previewUrl")
+
+	// PREVIEW -> HTML content
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/preview", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "PDF preview (stub)")
 }
