@@ -18,5 +18,11 @@ RUN python3 -m pip install --no-cache-dir requests beautifulsoup4 >/dev/null 2>&
 
 WORKDIR /workdir
 
+# Install Docker Buildx CLI plugin so BuildKit-enabled builds inside the runner work
+# (prevents BuildKit errors when scripts set DOCKER_BUILDKIT=1).
+RUN mkdir -p /usr/local/lib/docker/cli-plugins \
+  && curl -fsSL "https://github.com/docker/buildx/releases/download/v0.11.4/buildx-v0.11.4.linux-amd64" -o /usr/local/lib/docker/cli-plugins/docker-buildx \
+  && chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx || true
+
 # Default entrypoint is a shell so the test script can be executed by bind-mounting the repo
 ENTRYPOINT ["/bin/bash"]

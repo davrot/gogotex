@@ -94,12 +94,16 @@ r.GET("/ready", func(c *gin.Context) {
 	ready := true
 	deps := map[string]bool{}
 
-	// storage readiness: either Redis-backed sessions or MongoDB-backed services must be available
-	if userSvc == nil || sessionsSvc == nil {
+	// storage readiness: service is ready when a session store is configured.
+	// (Redis-backed sessions are sufficient for storage; MongoDB provides user
+	// service when available.)
+	if sessionsSvc == nil {
 		deps["storage"] = false
 		ready = false
 	} else {
 		deps["storage"] = true
+		// indicate whether user service is available (not required for storage)
+		deps["users"] = (userSvc != nil)
 	}
 
 	// OIDC readiness: if Keycloak URL was configured we expect a verifier (or ALLOW_INSECURE_TOKEN)

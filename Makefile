@@ -41,15 +41,23 @@ ci-integration:
 
 .PHONY: auth-image
 auth-image:
-	docker build -t gogotex-auth:local backend/go-services
+	DOCKER_BUILDKIT=1 docker build -t gogotex-auth:local backend/go-services
 
 .PHONY: integration-runner-image
 integration-runner-image:
 	@echo "Building integration-runner image (ubuntu + docker + curl + jq)..."
-	docker build -f scripts/ci/Dockerfile.integration -t gogotex/integration-runner:latest .
+	DOCKER_BUILDKIT=1 docker build -f scripts/ci/Dockerfile.integration -t gogotex/integration-runner:latest .
 	@echo "Built gogotex/integration-runner:latest"
 
 .PHONY: run-integration-in-docker
 run-integration-in-docker:
 	chmod +x scripts/ci/run-integration-in-docker.sh
 	./scripts/ci/run-integration-in-docker.sh
+
+.PHONY: install-buildx
+install-buildx:
+	@echo "Installing docker buildx to ~/.docker/cli-plugins (requires curl)"
+	@mkdir -p ~/.docker/cli-plugins
+	@curl -fsSL "https://github.com/docker/buildx/releases/download/v0.11.4/buildx-v0.11.4.linux-amd64" -o ~/.docker/cli-plugins/docker-buildx || true
+	@chmod +x ~/.docker/cli-plugins/docker-buildx || true
+	@echo "Done — run 'docker buildx version' to verify."

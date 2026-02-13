@@ -1721,6 +1721,15 @@ go test ./... -v
 - [x] All dependencies resolve (`go mod tidy`)
 - [x] Unit tests pass for implemented components (including rate limiter and Redis-backed session/blacklist)
 
+### Recent fixes & additions (new)
+- [x] Prevent silent container exit on startup (server run in goroutine + select{})
+- [x] Improved readiness logic (Redis-backed sessions satisfy storage readiness)
+- [x] Startup diagnostics and checkpoints added to `main.go` for easier debugging
+- [x] Integration script hardened: passes `REDIS_*` envs, waits on `/ready`, verifies/patches Keycloak client flags
+- [x] CI/runner improvements: integration-runner image now includes Docker Buildx; `auth-integration-test.sh` prefers buildx (falls back safely)
+- [x] Automated Keycloak client provisioning/patching added to `scripts/keycloak-setup.sh` and integration script
+- [x] Build & integration now run reliably in the integration-runner (successful E2E after fixes)
+
 ### Integration
 - [x] Auth service starts in Docker (image `gogotex-auth:ci`)
 - [x] Can connect to MongoDB from service (integration test verifies user upsert)
@@ -1735,7 +1744,7 @@ go test ./... -v
 - [x] `scripts/minio-init.sh` ensures application bucket exists (idempotent)
 
 ### API Testing (status)
-- [ ] Call `/auth/login` with a *reliable* authorization-code end-to-end: partial (flow implemented; intermittent Keycloak code exchange flakiness remains)
+- [~] Call `/auth/login` with a *reliable* authorization-code end-to-end — still **partial**. Flow implemented and integration harness hardened, but intermittent Keycloak/redirect/callback flakiness and CI timing issues remain; recommended follow-ups are listed below.
 - [x] Access tokens returned for `client_credentials` flow
 - [x] Can call `/auth/me` with Bearer token (returns user)
 - [x] `/auth/refresh` endpoint: server-side refresh validation implemented

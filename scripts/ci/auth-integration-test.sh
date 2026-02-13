@@ -148,7 +148,13 @@ AUTH_CONTAINER_NAME="gogotex-auth-integration"
 
 # Build image
 echo "Building auth image $AUTH_IMAGE..."
-docker build -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
+if docker buildx version >/dev/null 2>&1; then
+  echo "Using docker buildx (BuildKit)"
+  docker buildx build --load -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
+else
+  echo "docker buildx not available — falling back to classic docker build"
+  docker build -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
+fi
 
 # Ensure we always clean up the auth container when the script exits
 cleanup() {
