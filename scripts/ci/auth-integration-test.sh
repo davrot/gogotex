@@ -52,6 +52,8 @@ echo "Running Keycloak setup..."
 echo "Building frontend image with in-network VITE settings..."
 docker build \
   --build-arg VITE_KEYCLOAK_URL=http://keycloak-keycloak:8080 \
+  --build-arg VITE_KEYCLOAK_REALM=gogotex \
+  --build-arg VITE_KEYCLOAK_CLIENT_ID=gogotex-backend \
   --build-arg VITE_AUTH_URL=http://gogotex-auth-integration:8081 \
   --build-arg VITE_REDIRECT_URI=http://frontend/auth/callback \
   -t gogotex-frontend:local "$ROOT_DIR/frontend"
