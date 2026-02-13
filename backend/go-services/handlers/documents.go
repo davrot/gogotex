@@ -34,6 +34,7 @@ func RegisterDocumentRoutes(r *gin.Engine) {
 	r.POST("/api/documents", CreateDocument)
 	r.GET("/api/documents/:id", GetDocument)
 	r.PATCH("/api/documents/:id", UpdateDocument)
+	r.DELETE("/api/documents/:id", DeleteDocument)
 }
 
 // ListDocuments returns a short listing of available documents (id + name)
@@ -105,4 +106,17 @@ func GetDocument(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"id": d.ID, "name": d.Name, "content": d.Content, "createdAt": d.CreatedAt, "updatedAt": d.UpdatedAt})
+}
+
+// DeleteDocument removes a document from the in-memory store
+func DeleteDocument(c *gin.Context) {
+	id := c.Param("id")
+	documentsMu.Lock()
+	defer documentsMu.Unlock()
+	if _, ok := documentsStore[id]; !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	delete(documentsStore, id)
+	c.Status(http.StatusNoContent)
 }

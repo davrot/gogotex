@@ -48,13 +48,22 @@ test.describe('Editor (Phase‑03)', () => {
       await route.continue()
     })
 
-    // mock GET /api/documents/EX_DOC
+    // mock GET/PATCH/DELETE /api/documents/EX_DOC
     await page.route('**/api/documents/EX_DOC', async (route) => {
-      if (route.request().method() === 'GET') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'EX_DOC', name: 'existing.tex', content: '% existing document\n\\documentclass{article}\n' }) })
-      } else {
-        await route.continue()
+      const m = route.request().method()
+      if (m === 'GET') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'EX_DOC', name: 'existing.tex', content: '% existing document\\n\\documentclass{article}\\n' }) })
+        return
       }
+      if (m === 'PATCH') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'EX_DOC', name: 'renamed.tex' }) })
+        return
+      }
+      if (m === 'DELETE') {
+        await route.fulfill({ status: 204, body: '' })
+        return
+      }
+      await route.continue()
     })
     // ensure editor present (CodeMirror may fail in some CI environments)
     const editorPresent = await page.locator(editorSelector).count()
@@ -73,6 +82,23 @@ test.describe('Editor (Phase‑03)', () => {
       const stored = await page.evaluate(() => localStorage.getItem('gogotex.editor.content'))
       expect(stored).toBeTruthy()
       expect(stored).toContain('\\documentclass{article}')
+
+      // Rename the existing document from the DocumentList (stub prompt response)
+      await page.evaluate(() => { window.prompt = () => 'renamed.tex' })
+      await page.click('button:has-text("Rename")')
+      await page.waitForTimeout(200)
+      // after rename the DocumentList item text should update (mock returns renamed name)
+      await expect(page.locator('button:has-text("renamed.tex")')).toBeVisible()
+
+      // Delete the existing document
+      await page.click('button:has-text("Delete")')
+      // confirm dialog
+      await page.evaluate(() => { window.confirm = () => true })
+      await page.click('button:has-text("Delete")')
+      await page.waitForTimeout(200)
+      // the deleted entry should no longer be present
+      const listPresent = await page.locator('button:has-text("existing.tex")').count()
+      expect(listPresent).toBe(0)
 
       // click Bold button and ensure latex command inserted
       await page.click('button:has-text("Bold")')

@@ -47,5 +47,15 @@ export const editorService = {
     }
     return res.json()
   },
+
+  async deleteDocument(docId: string) {
+    if (!docId) throw new Error('docId required')
+    const res = await authService.apiFetch(`/api/documents/${docId}`, { method: 'DELETE' })
+    if (!res.ok && res.status !== 204) {
+      const t = await res.text()
+      throw new Error(`deleteDocument failed: ${res.status} ${t}`)
+    }
+    return true
+  },
 }
 

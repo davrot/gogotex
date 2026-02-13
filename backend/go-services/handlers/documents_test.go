@@ -63,4 +63,25 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "created document should appear in list")
+
+	// DELETE
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/documents/%s", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNoContent, w.Code)
+
+	// LIST should no longer contain it
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/documents", nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	err = json.Unmarshal(w.Body.Bytes(), &list)
+	require.NoError(t, err)
+	found = false
+	for _, it := range list {
+		if idv, ok := it["id"].(string); ok && idv == id {
+			found = true
+		}
+	}
+	assert.False(t, found, "deleted document should not appear in list")
 }
