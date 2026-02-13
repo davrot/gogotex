@@ -194,6 +194,13 @@ test.describe('Editor (Phase‑03)', () => {
         await route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body><h1>PDF preview (stub)</h1><p>CREATED_DOC</p></body></html>' })
       })
 
+      // respond to SyncTeX download (gzipped stub)
+      await page.route('**/api/documents/CREATED_DOC/compile/*/synctex', async (route) => {
+        const zlib = require('zlib')
+        const gz = zlib.gzipSync('SyncTeX Version:1\nInput:main.tex\nOutput:main.pdf\n')
+        await route.fulfill({ status: 200, contentType: 'application/gzip', body: gz })
+      })
+
       // click Compile -> should show compiling + logs, then iframe appears
       await page.click('button:has-text("Compile")')
       await page.waitForTimeout(200)
@@ -203,6 +210,11 @@ test.describe('Editor (Phase‑03)', () => {
       await page.waitForTimeout(600)
       await expect(page.frameLocator('iframe[title="preview"]').locator('text=PDF preview (stub)')).toBeVisible()
       await expect(page.locator('pre')).toContainText('Compiled successfully')
+
+      // SyncTeX should be fetched by the frontend and a local indicator/localStorage set
+      await page.waitForSelector('.synctex-available', { timeout: 2000 })
+      const synBase64 = await page.evaluate(() => localStorage.getItem('gogotex.editor.synctex'))
+      expect(synBase64).toBeTruthy()
     } else {
       // Fallback: exercise autosave logic directly
       await page.evaluate(() => { try { localStorage.setItem('gogotex.editor.content', '\\documentclass{article}\\\n') } catch (e) {} })

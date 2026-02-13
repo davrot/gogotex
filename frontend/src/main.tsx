@@ -6,6 +6,7 @@ import { CallbackPage } from './pages/auth/CallbackPage'
 import EditorPage from './pages/editor/EditorPage'
 import LoginPage from './pages/auth/LoginPage'
 import Dashboard from './pages/dashboard/Dashboard'
+import ProtectedRoute from './components/ProtectedRoute'
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

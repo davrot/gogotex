@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -148,4 +151,47 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "canceled", logs2["status"])
 	assert.Contains(t, logs2["logs"].(string), "Canceled")
+
+	// JOB LIST
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/jobs", id), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var jobs []map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &jobs)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(jobs), 1)
+
+	// download the earlier (ready) job PDF
+	// find a ready job id from compileJobs map
+	var readyJob string
+	compileJobsMu.RLock()
+	for k, j := range compileJobs {
+		if j.DocID == id && j.Status == "ready" {
+			readyJob = k
+			break
+		}
+	}
+	compileJobsMu.RUnlock()
+	require.NotEmpty(t, readyJob)
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/download", id, readyJob), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/pdf", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "%PDF")
+
+	// synctex endpoint should return gzipped SyncTeX content (fallback or real)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex", id, readyJob), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/gzip", w.Header().Get("Content-Type"))
+	gr, err := gzip.NewReader(bytes.NewReader(w.Body.Bytes()))
+	require.NoError(t, err)
+	defer gr.Close()
+	b, err := io.ReadAll(gr)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "SyncTeX")
 }

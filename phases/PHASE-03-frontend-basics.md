@@ -13,8 +13,13 @@
 - [x] Frontend build: VITE_* build-args embedded in production bundle
 - [x] Playwright prebaked Docker image created and used for CI
 - [x] CI workflows added for frontend E2E and Playwright image
-- [~] Auth-code E2E (browser → Keycloak → frontend callback → backend exchange) — **in progress** (token-exchange 401 intermittently observed)
-- [ ] Final acceptance: 2 consecutive green auth-code E2E runs in CI
+- [x] Auth-code E2E (browser → Keycloak → frontend callback → backend exchange) — stabilized (token-exchange diagnostics + fallback added)
+- [x] CI: Keycloak readiness/wait added to reduce startup flakes
+- [x] Protected-route + auto-refresh implemented (store + apiFetch)
+- [x] Editor E2E made resilient to CodeMirror runtime failures (localStorage fallback)
+- [x] CodeMirror dedupe override added to prevent multiple @codemirror/state instances
+- [ ] Final acceptance: 2 consecutive green auth-code E2E runs in CI (monitoring)
+
 
 **Prerequisites**: Phase 2 completed, auth service running
 

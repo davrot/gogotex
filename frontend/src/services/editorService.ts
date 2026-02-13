@@ -87,8 +87,16 @@ export const editorService = {
     }
     return res.json()
   },
-}
-}
 
+  async getCompileSynctex(docId: string, jobId: string) {
+    if (!docId || !jobId) throw new Error('docId and jobId required')
+    const res = await authService.apiFetch(`/api/documents/${docId}/compile/${jobId}/synctex`)
+    if (!res.ok) {
+      const t = await res.text()
+      throw new Error(`getCompileSynctex failed: ${res.status} ${t}`)
+    }
+    // return binary ArrayBuffer (gzipped SyncTeX)
+    return res.arrayBuffer()
+  },
 }
 

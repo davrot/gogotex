@@ -50,6 +50,7 @@ export const EditorPage: React.FC = () => {
   const [compileStatus, setCompileStatus] = useState<'idle'|'compiling'|'ready'|'error'>('idle')
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null)
   const [compileLogs, setCompileLogs] = useState<string | null>(null)
+  const [synctexAvailable, setSynctexAvailable] = useState<boolean>(false)
 
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(() => {
     try {
@@ -175,6 +176,18 @@ export const EditorPage: React.FC = () => {
         if (s && s.status === 'ready') {
           setCompilePreviewUrl(s.previewUrl || `/api/documents/${id}/preview`)
           setCompileStatus('ready')
+          // try to fetch SyncTeX (non-blocking, UI doesn't fail if missing)
+          (async () => {
+            try {
+              const syn = await svc.editorService.getCompileSynctex(id, s.jobId)
+              const arr = new Uint8Array(syn)
+              const b64 = btoa(String.fromCharCode(...arr))
+              try { localStorage.setItem('gogotex.editor.synctex', b64) } catch (e) { /* ignore */ }
+              setSynctexAvailable(true)
+            } catch (e) {
+              console.warn('failed to fetch synctex', e)
+            }
+          })()
           return
         }
         if (s && s.status === 'canceled') {
@@ -320,10 +333,9 @@ export const EditorPage: React.FC = () => {
           {compileStatus === 'compiling' && (
             <button className="btn btn-ghost" onClick={() => void cancelCompile()}>Cancel</button>
           )}
-          <div style={{fontSize:12,color:'#6b7280'}}>
-            {compileStatus === 'compiling' && 'Compiling...'}
-            {compileStatus === 'ready' && 'Preview ready'}
-            {compileStatus === 'error' && 'Compile failed'}
+          <div style={{fontSize:12,color:'#6b7280',display:'flex',alignItems:'center',gap:8}}>
+            <div>{compileStatus === 'compiling' && 'Compiling...'}{compileStatus === 'ready' && 'Preview ready'}{compileStatus === 'error' && 'Compile failed'}</div>
+            {synctexAvailable && (<div className="synctex-available" style={{fontSize:11,color:'#059669',padding:'2px 6px',borderRadius:4,background:'#ecfdf5'}}>SyncTeX available</div>)}
           </div>
         </div>
         {compileLogs && (

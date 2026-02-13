@@ -57,6 +57,29 @@ if [ "$PLAYWRIGHT_FORCE_OFFICIAL" != "true" ] && docker image inspect "$PLAYWRIG
   DOCKER_RUN_ENTRYPOINT="--entrypoint /bin/sh"
 fi
 
+# Wait for Keycloak OIDC readiness (avoid transient DB/startup flakes)
+KC_WAIT_TIMEOUT=${KC_WAIT_TIMEOUT:-60}
+KC_POLL_INTERVAL=${KC_POLL_INTERVAL:-2}
+KC_BASE_URL=${PLAYWRIGHT_KEYCLOAK%/sso} # strip trailing /sso if present
+KC_REALM_ENDPOINT="${KC_BASE_URL}/sso/realms/gogotex/protocol/openid-connect/certs"
+
+echo "Waiting up to ${KC_WAIT_TIMEOUT}s for Keycloak OIDC endpoint..." >&2
+kc_ok=0
+tries=$((KC_WAIT_TIMEOUT / KC_POLL_INTERVAL))
+for i in $(seq 1 $tries); do
+  code=$(docker run --rm --network "$NET" curlimages/curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "$KC_REALM_ENDPOINT" 2>/dev/null || echo 000)
+  if [ "$code" = "200" ]; then
+    kc_ok=1
+    break
+  fi
+  sleep $KC_POLL_INTERVAL
+done
+if [ "$kc_ok" -ne 1 ]; then
+  echo "ERROR: Keycloak OIDC endpoint not available after ${KC_WAIT_TIMEOUT}s (last_code=${code})." >&2
+  echo "Check 'docker ps -a' and 'docker logs keycloak-keycloak' for details." >&2
+  exit 1
+fi
+
 # Run Playwright in the selected Docker image on the same Docker network
 # Artifacts (screenshots/traces) are written to frontend/test-results by Playwright.
 docker run --rm $DOCKER_RUN_ENTRYPOINT --network "$NET" \

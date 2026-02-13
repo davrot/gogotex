@@ -4,9 +4,21 @@ const KEYCLOAK = process.env.PLAYWRIGHT_KEYCLOAK || 'http://keycloak-keycloak:80
 const CLIENT_ID = process.env.PLAYWRIGHT_KC_CLIENT || 'gogotex-backend'
 const REALM = process.env.PLAYWRIGHT_KC_REALM || 'gogotex'
 const TEST_USER = process.env.TEST_USER || 'testuser'
-const TEST_PASS = process.env.TEST_PASS || 'Test123!'
+let TEST_PASS = process.env.TEST_PASS || 'Test123!'
+// If the repository provides a test user password file (used by CI), prefer that
+try {
+  // path relative to the frontend test runner (workspace mounted at /app)
+  const fs = require('fs')
+  const pwdFile = '../../gogotex-support-services/keycloak-service/testuser_password.txt'
+  if ((!process.env.TEST_PASS || process.env.TEST_PASS === 'Test123!') && fs.existsSync(pwdFile)) {
+    TEST_PASS = fs.readFileSync(pwdFile, 'utf8').trim()
+  }
+} catch (e) { /* ignore */ }
 
 test('auth-code E2E: browser -> Keycloak -> frontend callback -> backend exchange', async ({ page, baseURL }) => {
+  test.setTimeout(120000)
+  page.on('console', (c) => console.log('PAGE>', c.type(), c.text()))
+
   const redirectUri = process.env.PLAYWRIGHT_REDIRECT_URI || `${baseURL}/auth/callback`
   const authUrl = `${KEYCLOAK}/realms/${REALM}/protocol/openid-connect/auth?client_id=${CLIENT_ID}&response_type=code&scope=openid&redirect_uri=${encodeURIComponent(
     redirectUri,
@@ -31,21 +43,40 @@ test('auth-code E2E: browser -> Keycloak -> frontend callback -> backend exchang
     }
   })
 
+  // wait for Keycloak readiness (health endpoint) before attempting interactive login
+  const healthUrl = `${KEYCLOAK}/health/ready`
+  const maxWait = 60_000
+  const start = Date.now()
+  while (Date.now() - start < maxWait) {
+    try {
+      const resp = await page.request.get(healthUrl)
+      if (resp.ok()) break
+    } catch (e) { /* ignore */ }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+
   await page.goto(authUrl)
   // wait for Keycloak login form to render (fail fast if missing)
-  await page.waitForSelector('input[name="username"]', { timeout: 5000 })
-  await page.waitForSelector('input[name="password"]', { timeout: 5000 })
+  await page.waitForSelector('input[name="username"]', { timeout: 10000 })
+  await page.waitForSelector('input[name="password"]', { timeout: 10000 })
   // DEBUG: capture page URL + small snippet for CI diagnostics
   console.log('DEBUG: landed URL ->', page.url())
   const snippet = (await page.content()).slice(0,200)
   console.log('DEBUG: page content snippet ->', snippet)
   await page.fill('input[name="username"]', TEST_USER)
   await page.fill('input[name="password"]', TEST_PASS)
+
   // observe the outgoing auth callback navigation and capture the 'code' for diagnostics
-  await Promise.all([
-    page.waitForNavigation({ url: new RegExp(redirectUri.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')) }),
-    page.click('button[type=submit], input[type=submit], button#kc-login'),
-  ])
+  const navPromise = page.waitForNavigation({ url: new RegExp(redirectUri.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')), timeout: 60000 })
+  await page.click('button[type=submit], input[type=submit], button#kc-login')
+  try {
+    await navPromise
+  } catch (err) {
+    // capture page state for diagnostics and rethrow
+    console.error('Keycloak login did not complete — page snapshot:')
+    console.error(await page.content())
+    throw err
+  }
 
   // DEBUG: print the callback URL (includes authorization code) so CI logs can reproduce token exchanges
   console.log('DEBUG: callback URL ->', page.url())
