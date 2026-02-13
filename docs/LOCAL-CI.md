@@ -49,6 +49,16 @@ START_TEXLIVE=true CLEANUP=true ./scripts/ci/auth-integration-test.sh
 DOCKER_TEX_IMAGE=blang/latex:ubuntu ./scripts/ci/auth-integration-test.sh
 ```
 
+To run the in-process `go-document` service (useful for exercising Phase‑05 handlers without starting a separate container), set `DOC_SERVICE_INLINE=true` when starting the auth service. Example:
+
+```bash
+# start auth with inline document service for local development
+DOC_SERVICE_INLINE=true ./scripts/dev/up-auth-doc-inline.sh
+
+# run the integration script with the inline document service
+DOC_SERVICE_INLINE=true START_TEXLIVE=true CLEANUP=true ./scripts/ci/auth-integration-test.sh
+```
+
 - Use `.env` or `gogotex-support-services/.env` to provide required service credentials for Keycloak/Redis/MinIO when running the health-check.
 - For reproducible CI runs, `docker-compose.ci.yml` mounts the repository and runs `scripts/ci/run-local.sh` inside a clean `golang:1.20` container.
 
