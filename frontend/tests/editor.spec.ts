@@ -246,6 +246,13 @@ test.describe('Editor (Phase‑03)', () => {
       expect(lookup.line).toBe(5)
       expect(lookup.y).toBeCloseTo(0.45, 2)
 
+      // Click the UI 'Go to PDF' button which uses the lookup endpoint and posts to iframe
+      await page.click('button:has-text("Go to PDF")')
+      await page.waitForTimeout(200)
+      const lastGo = await page.frameLocator('iframe[title="preview"]').evaluate(() => (window as any)._lastGoTo)
+      expect(lastGo).toBeTruthy()
+      expect(lastGo.y).toBeCloseTo(0.45, 2)
+
       // Clicking the preview should move the editor caret (postMessage bridge)
       await page.frameLocator('iframe[title="preview"]').locator('p[data-line="5"]').click()
       await page.waitForTimeout(200)

@@ -50,6 +50,7 @@ export const EditorPage: React.FC = () => {
   const [compileStatus, setCompileStatus] = useState<'idle'|'compiling'|'ready'|'error'>('idle')
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null)
   const [compileLogs, setCompileLogs] = useState<string | null>(null)
+  const [compileJobId, setCompileJobId] = useState<string | null>(null)
   const [synctexAvailable, setSynctexAvailable] = useState<boolean>(false)
   // synctexMap: { [page: number]: Array<{ y: number, line: number }> }
   const [synctexMap, setSynctexMap] = useState<Record<number, Array<{ y: number; line: number }>> | null>(null)
@@ -171,6 +172,7 @@ export const EditorPage: React.FC = () => {
     try {
       const svc = await import('../../services/editorService')
       const job = await svc.editorService.compileDocument(id)
+      setCompileJobId(job?.jobId || null)
       // poll compile logs/status until ready or canceled
       for (let i = 0; i < 40; i++) {
         const s = await svc.editorService.getCompileLogs(id)
@@ -178,6 +180,7 @@ export const EditorPage: React.FC = () => {
         if (s && s.status === 'ready') {
           setCompilePreviewUrl(s.previewUrl || `/api/documents/${id}/preview`)
           setCompileStatus('ready')
+          setCompileJobId(s.jobId || null)
           // try to fetch SyncTeX (non-blocking, UI doesn't fail if missing)
           (async () => {
             try {
@@ -371,6 +374,24 @@ export const EditorPage: React.FC = () => {
               <button className="btn" style={{marginLeft:8}} onClick={insertSection}>Section</button>
               <button className="btn" style={{marginLeft:8}} onClick={insertMath}>Math</button>
               <button className="btn" style={{marginLeft:8}} onClick={insertTemplate}>Insert template</button>
+              <button className="btn" onClick={async () => {
+                try {
+                  const caret = (localStorage.getItem('gogotex.editor.caretLine') || '1')
+                  const line = Number(caret || '1')
+                  const id = docId || (localStorage.getItem('gogotex.editor.docId') || null)
+                  if (!id || !compileJobId) { setStatusMsg({ type: 'error', text: 'No attached/compiled document' }); setTimeout(()=>setStatusMsg(null),2000); return }
+                  const svc = await import('../../services/editorService')
+                  const res = await svc.editorService.getCompileSynctexLookup(id, compileJobId, line)
+                  const iframe = document.querySelector('iframe[title="preview"]') as HTMLIFrameElement | null
+                  if (iframe && iframe.contentWindow) {
+                    iframe.contentWindow.postMessage({ type: 'go-to', page: res.page, y: res.y }, '*')
+                  }
+                } catch (e) {
+                  setStatusMsg({ type: 'error', text: 'Go to PDF failed' })
+                  setTimeout(()=>setStatusMsg(null),2000)
+                }
+              }}>Go to PDF</button>
+              <button className="btn btn-secondary" style={{marginLeft:8}} onClick={() => { navigator.clipboard?.writeText(value) }}>Copy</button>
               <button className="btn btn-secondary" style={{marginLeft:8}} onClick={() => void syncToServer()}>{docId ? `Save to server (doc: ${docId})` : 'Save to server'}</button>
             </div>
           </div>

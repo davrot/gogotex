@@ -284,6 +284,22 @@ func PreviewDocument(c *gin.Context) {
           parent.postMessage({ type: 'pdf-click', page: 1, y: y }, '*')
         } catch(e) { /* ignore */ }
       })
+      // respond to parent 'go-to' requests (editor -> preview)
+      window.addEventListener('message', function(ev){ try {
+        const d = ev.data || {}
+        if (d && d.type === 'go-to' && typeof d.y === 'number') {
+          const rect = canvas.getBoundingClientRect()
+          const targetY = Math.max(0, Math.min(1, d.y)) * canvas.height
+          // scroll the canvas into view near targetY
+          window.scrollTo({ top: Math.max(0, targetY - 120), behavior: 'smooth' })
+          // draw a transient highlight rectangle
+          try {
+            const ctx2 = canvas.getContext('2d')
+            ctx2.save(); ctx2.strokeStyle = 'red'; ctx2.lineWidth = 2; ctx2.strokeRect(10, Math.max(0, targetY - 8), canvas.width - 20, 16); setTimeout(()=>{ /* no-op to let highlight be visible */ }, 400)
+            ctx2.restore()
+          } catch(e) {}
+        }
+      } catch(e){} }, false)
     </script>
   </body>
 </html>`, d.Name, d.Name, d.ID, pdfURL)
@@ -297,6 +313,8 @@ func PreviewDocument(c *gin.Context) {
 <script>
 function sendLine(line){ try { parent.postMessage({ type: 'synctex-click', line: line }, '*') } catch(e){} }
 window.addEventListener('click', function(ev){ var t = ev.target; var ln = t && t.dataset && t.dataset.line ? Number(t.dataset.line) : 1; sendLine(ln) })
+// respond to parent 'go-to' messages (editor -> preview stub)
+window.addEventListener('message', function(ev){ try { var d = ev.data || {}; if (d && d.type === 'go-to' && typeof d.y === 'number') { window._lastGoTo = d; var y = d.y; var el = document.querySelector('p[data-line]'); var target = document.querySelector('[data-line="'+Math.round(y*10)+'"]') || document.querySelector('p[data-line="5"]'); try { target && target.scrollIntoView({behavior:'smooth', block:'center'}); } catch(e){} } } catch(e){} }, false)
 </script>
 </head><body><h2>PDF preview (stub)</h2><p>Document: <strong>%s</strong> (%s)</p><div id="pdf" style="height:70vh;border:1px solid #ddd;padding:12px;overflow:auto;"><p data-line="1">Page 1 — top (maps to line 1)</p><p data-line="5">Page 1 — middle (maps to line 5)</p><p data-line="10">Page 1 — bottom (maps to line 10)</p></div></body></html>`, d.Name, d.Name, d.ID)
 	c.Header("Content-Type", "text/html; charset=utf-8")
