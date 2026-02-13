@@ -58,14 +58,27 @@ if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
 
   # Playwright run timeout (seconds) — shell-level guard to prevent hangs
   PLAYWRIGHT_RUN_TIMEOUT=${PLAYWRIGHT_RUN_TIMEOUT:-120}
+  echo "Playwright runner timeout set to ${PLAYWRIGHT_RUN_TIMEOUT}s" >&2
 
-  if ! timeout ${PLAYWRIGHT_RUN_TIMEOUT}s "$ROOT_DIR/scripts/ci/auth-integration-test/playwright.sh"; then
-    echo "Playwright step timed out or failed (timeout=${PLAYWRIGHT_RUN_TIMEOUT}s)"; docker logs keycloak-keycloak 2>/dev/null | sed -n '1,200p' || true
-    if [ "${FAIL_ON_AUTH_CODE:-true}" = "true" ]; then
-      exit 7
-    else
-      echo "WARN: Playwright timed out/failed but continuing (FAIL_ON_AUTH_CODE=false)"
+  # Ensure `timeout` is available (GNU coreutils). If missing, fall back to a background timer.
+  if command -v timeout >/dev/null 2>&1; then
+    echo "Using 'timeout' wrapper to guard Playwright run" >&2
+    if ! timeout ${PLAYWRIGHT_RUN_TIMEOUT}s "$ROOT_DIR/scripts/ci/auth-integration-test/playwright.sh"; then
+      echo "Playwright step timed out or failed (timeout=${PLAYWRIGHT_RUN_TIMEOUT}s)" >&2; docker logs keycloak-keycloak 2>/dev/null | sed -n '1,200p' || true
+      if [ "${FAIL_ON_AUTH_CODE:-true}" = "true" ]; then
+        exit 7
+      else
+        echo "WARN: Playwright timed out/failed but continuing (FAIL_ON_AUTH_CODE=false)" >&2
+      fi
     fi
+  else
+    echo "'timeout' not available — running Playwright and enforcing kill after ${PLAYWRIGHT_RUN_TIMEOUT}s" >&2
+    "$ROOT_DIR/scripts/ci/auth-integration-test/playwright.sh" &
+    PW_PID=$!
+    ( sleep ${PLAYWRIGHT_RUN_TIMEOUT} && kill -0 "$PW_PID" 2>/dev/null && echo "Playwright exceeded timeout (${PLAYWRIGHT_RUN_TIMEOUT}s); killing..." >&2 && kill -TERM "$PW_PID" 2>/dev/null && sleep 5 && kill -KILL "$PW_PID" 2>/dev/null ) &
+    WATCHER_PID=$!
+    wait "$PW_PID" || true
+    kill -9 "$WATCHER_PID" 2>/dev/null || true
   fi
 fi
 

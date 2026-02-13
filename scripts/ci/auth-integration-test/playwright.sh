@@ -14,9 +14,24 @@ PLAYWRIGHT_KEYCLOAK=${PLAYWRIGHT_KEYCLOAK:-http://keycloak-keycloak:8080/sso}
 PLAYWRIGHT_REDIRECT_URI=${PLAYWRIGHT_REDIRECT_URI:-http://frontend/auth/callback}
 TEST_USER=${TEST_USER:-testuser}
 TEST_PASS=${TEST_PASS:-$(cat "$ROOT_DIR/gogotex-support-services/keycloak-service/testuser_password.txt" 2>/dev/null || echo "Test123!")}
+# Verbosity & reporter: set PLAYWRIGHT_VERBOSE=true to enable verbose Playwright output
+PLAYWRIGHT_VERBOSE=${PLAYWRIGHT_VERBOSE:-false}
+PLAYWRIGHT_REPORTER=${PLAYWRIGHT_REPORTER:-list}
+# Per-test timeout (ms)
+PLAYWRIGHT_PER_TEST_TIMEOUT=${PLAYWRIGHT_PER_TEST_TIMEOUT:-30000}
 
-echo "Playwright: base_url=$PLAYWRIGHT_BASE_URL kc=$PLAYWRIGHT_KEYCLOAK redirect=$PLAYWRIGHT_REDIRECT_URI user=$TEST_USER"
+# Diagnostic summary (stderr only)
+echo "Playwright: base_url=$PLAYWRIGHT_BASE_URL kc=$PLAYWRIGHT_KEYCLOAK redirect=$PLAYWRIGHT_REDIRECT_URI user=$TEST_USER reporter=$PLAYWRIGHT_REPORTER per_test_timeout=${PLAYWRIGHT_PER_TEST_TIMEOUT}ms" >&2
 
+# Build the inner command; keep output visible when verbosity is requested
+if [ "$PLAYWRIGHT_VERBOSE" = "true" ]; then
+  INNER_CMD="npm install --no-audit --no-fund || true; npx playwright install --with-deps || true; npx playwright test tests/auth.spec.ts --timeout=$PLAYWRIGHT_PER_TEST_TIMEOUT --reporter=$PLAYWRIGHT_REPORTER"
+else
+  INNER_CMD="npm install --no-audit --no-fund >/dev/null 2>&1 || true; npx playwright install --with-deps >/dev/null 2>&1 || true; npx playwright test tests/auth.spec.ts --timeout=$PLAYWRIGHT_PER_TEST_TIMEOUT --reporter=$PLAYWRIGHT_REPORTER"
+fi
+
+# Run Playwright in the official Docker image on the same Docker network
+# Artifacts (screenshots/traces) are written to frontend/test-results by Playwright.
 docker run --rm --network "$NET" \
   -e PLAYWRIGHT_BASE_URL="$PLAYWRIGHT_BASE_URL" \
   -e PLAYWRIGHT_KEYCLOAK="$PLAYWRIGHT_KEYCLOAK" \
@@ -24,4 +39,5 @@ docker run --rm --network "$NET" \
   -e TEST_USER="$TEST_USER" \
   -e TEST_PASS="$TEST_PASS" \
   -v "$ROOT_DIR/frontend":/app -w /app mcr.microsoft.com/playwright:latest \
-  sh -c "npm install --no-audit --no-fund >/dev/null 2>&1 || true; npx playwright install --with-deps >/dev/null 2>&1 || true; npx playwright test tests/auth.spec.ts --timeout=30000"
+  sh -c "$INNER_CMD"
+
