@@ -141,9 +141,33 @@ test.describe('Editor (Phase‑03)', () => {
       await expect(page.locator('.editor-status')).toContainText('CREATED_DOC')
       await expect(page.locator('.editor-toast-success')).toContainText('Attached document')
 
-      // now Save to server should PATCH CREATED_DOC
+      // Now test queued save + retry behavior: first PATCH fails, then succeeds on retry
+      let patchCalls = 0
+      await page.route('**/api/documents/CREATED_DOC', async (route) => {
+        const m = route.request().method()
+        if (m === 'PATCH') {
+          patchCalls += 1
+          if (patchCalls === 1) {
+            // simulate transient failure (network/server error)
+            await route.fulfill({ status: 500, body: 'server error' })
+            return
+          }
+          await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'CREATED_DOC', name: 'mydoc.tex' }) })
+          return
+        }
+        await route.continue()
+      })
+
+      // trigger a Save -> first attempt will fail and should enqueue
       await page.click('button:has-text("Save to server")')
-      await page.waitForTimeout(500)
+      await page.waitForTimeout(300)
+      await expect(page.locator('.save-indicator')).toContainText('queued')
+
+      // force a retry by firing 'online' and assert retry succeeds and UI updates
+      await page.evaluate(() => window.dispatchEvent(new Event('online')))
+      await page.waitForTimeout(1500)
+      await expect(page.locator('.save-indicator')).toContainText('Saved')
+      expect(patchCalls).toBeGreaterThanOrEqual(2)
       expect(sawPatch).toBeTruthy()
     } else {
       // Fallback: exercise autosave logic directly

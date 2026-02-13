@@ -46,23 +46,71 @@ export const EditorPage: React.FC = () => {
   const [attachIdInput, setAttachIdInput] = useState<string>('')
   const [statusMsg, setStatusMsg] = useState<{ type: 'success'|'error'|'info', text: string } | null>(null)
 
-  const syncToServer = async (content?: string) => {
+  // Save queue / status (persisted so reloads keep pending saves)
+  const [saveStatus, setSaveStatus] = useState<'idle'|'saving'|'saved'|'queued'|'error'>('idle')
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+
+  const saveQueueKey = 'gogotex.editor.saveQueue'
+  const loadSaveQueue = (): Array<{ docId: string; content: string; ts: number }> => {
+    try {
+      const raw = localStorage.getItem(saveQueueKey)
+      return raw ? JSON.parse(raw) : []
+    } catch (e) { return [] }
+  }
+  const persistSaveQueue = (q: Array<{ docId: string; content: string; ts: number }>) => {
+    try { localStorage.setItem(saveQueueKey, JSON.stringify(q)) } catch (e) {}
+  }
+
+  // enqueue: keep only the latest content per docId (collapse)
+  const enqueueSave = (docIdToSave: string, content: string) => {
+    const q = loadSaveQueue()
+    const filtered = q.filter(it => it.docId !== docIdToSave)
+    filtered.push({ docId: docIdToSave, content, ts: Date.now() })
+    persistSaveQueue(filtered)
+    setSaveStatus('queued')
+  }
+
+  // process queue: try to flush oldest -> newest; stop on first failure
+  const processSaveQueue = async () => {
+    const q = loadSaveQueue()
+    if (q.length === 0) return
+    for (let i = 0; i < q.length; i++) {
+      const item = q[i]
+      try {
+        setSaveStatus('saving')
+        const svc = await import('../../services/editorService')
+        await svc.editorService.syncDraft(item.docId, item.content)
+        // success -> remove this item and continue
+        const remaining = loadSaveQueue().filter(it => it.docId !== item.docId)
+        persistSaveQueue(remaining)
+        setLastSavedAt(Date.now())
+        setSaveStatus('saved')
+      } catch (e) {
+        console.warn('processSaveQueue: sync failed for', item.docId, e)
+        setSaveStatus('queued')
+        // leave remaining queue intact and abort processing
+        return
+      }
+    }
+  }
+
+  // Attempt immediate sync; on failure enqueue for retry
+  const attemptImmediateSync = async (content?: string) => {
     const id = docId || (typeof window !== 'undefined' ? localStorage.getItem('gogotex.editor.docId') : null)
     if (!id) {
-      // no-op if no doc id configured
+      setSaveStatus('idle')
       return false
     }
+    setSaveStatus('saving')
     try {
-      const api = await import('../../services/authService')
-      const body = { content: content ?? value }
-      await api.authService.apiFetch(`/api/documents/${id}`, { method: 'PATCH', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } })
-      setStatusMsg({ type: 'success', text: 'Saved to server' })
-      setTimeout(() => setStatusMsg(null), 2500)
+      const svc = await import('../../services/editorService')
+      await svc.editorService.syncDraft(id, content ?? value)
+      setLastSavedAt(Date.now())
+      setSaveStatus('saved')
       return true
     } catch (e) {
-      console.warn('syncToServer failed', e)
-      setStatusMsg({ type: 'error', text: 'Save failed' })
-      setTimeout(() => setStatusMsg(null), 2500)
+      // network/error -> enqueue and schedule retry
+      enqueueSave(id, content ?? value)
       return false
     }
   }
@@ -79,6 +127,8 @@ export const EditorPage: React.FC = () => {
         setDocName(doc.name || docName)
         setStatusMsg({ type: 'success', text: `Attached document: ${newId}` })
         setTimeout(() => setStatusMsg(null), 3000)
+        // try flushing any queued saves for this doc
+        void processSaveQueue()
         return true
       }
       setStatusMsg({ type: 'error', text: 'create failed' })
@@ -105,18 +155,34 @@ export const EditorPage: React.FC = () => {
       setAttachIdInput('')
       setStatusMsg({ type: 'success', text: `Attached document: ${toAttach}` })
       setTimeout(() => setStatusMsg(null), 3000)
+      // attempt to flush queue for this id
+      void processSaveQueue()
     } catch (e) {
       setStatusMsg({ type: 'error', text: 'attach failed' })
       setTimeout(() => setStatusMsg(null), 2000)
     }
   }
 
-  // background debounce sync
+  // background debounce sync - use attemptImmediateSync so failures enqueue
   let syncTimer: any = null
   const scheduleSync = (content: string) => {
     if (syncTimer) clearTimeout(syncTimer)
-    syncTimer = setTimeout(() => { void syncToServer(content) }, 1000)
+    syncTimer = setTimeout(() => { void attemptImmediateSync(content) }, 1000)
   }
+
+  // periodically try to flush queue and listen for 'online' events
+  React.useEffect(() => {
+    const iv = setInterval(() => { void processSaveQueue() }, 3000)
+    const onOnline = () => { void processSaveQueue() }
+    window.addEventListener('online', onOnline)
+    // try to process any existing queue on mount
+    void processSaveQueue()
+    return () => {
+      clearInterval(iv)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [docId])
+
 
   return (
     <div style={{maxWidth:960,margin:'2rem auto'}}>
@@ -127,6 +193,14 @@ export const EditorPage: React.FC = () => {
         ) : (
           <div className="editor-status" style={{marginBottom:6,color:'#666'}}>No document attached</div>
         )}
+
+        {/* Save indicator */}
+        <div className={`save-indicator save-indicator-${saveStatus}`} style={{fontSize:12, color: saveStatus === 'error' ? '#b00020' : '#6b7280', marginTop:4}}>
+          {saveStatus === 'saving' && 'Saving...'}
+          {saveStatus === 'saved' && lastSavedAt && `Saved ${new Date(lastSavedAt).toLocaleTimeString()}`}
+          {saveStatus === 'queued' && 'Save queued (will retry)'}
+        </div>
+
         {statusMsg && (
           <div className={`editor-toast editor-toast-${statusMsg.type}`} style={{marginTop:6, color: statusMsg.type === 'error' ? '#b00020' : '#065f46'}}>{statusMsg.text}</div>
         )}
