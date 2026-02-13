@@ -98,5 +98,15 @@ export const editorService = {
     // return binary ArrayBuffer (gzipped SyncTeX)
     return res.arrayBuffer()
   },
+
+  async getCompileSynctexMap(docId: string, jobId: string) {
+    if (!docId || !jobId) throw new Error('docId and jobId required')
+    const res = await authService.apiFetch(`/api/documents/${docId}/compile/${jobId}/synctex/map`)
+    if (!res.ok) {
+      const t = await res.text()
+      throw new Error(`getCompileSynctexMap failed: ${res.status} ${t}`)
+    }
+    return res.json()
+  },
 }
 

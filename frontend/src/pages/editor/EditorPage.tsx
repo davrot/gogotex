@@ -51,6 +51,8 @@ export const EditorPage: React.FC = () => {
   const [compilePreviewUrl, setCompilePreviewUrl] = useState<string | null>(null)
   const [compileLogs, setCompileLogs] = useState<string | null>(null)
   const [synctexAvailable, setSynctexAvailable] = useState<boolean>(false)
+  // synctexMap: { [page: number]: Array<{ y: number, line: number }> }
+  const [synctexMap, setSynctexMap] = useState<Record<number, Array<{ y: number; line: number }>> | null>(null)
 
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(() => {
     try {
@@ -187,6 +189,23 @@ export const EditorPage: React.FC = () => {
             } catch (e) {
               console.warn('failed to fetch synctex', e)
             }
+            // fetch best-effort SyncTeX JSON map (Phase-03 prototype)
+            try {
+              const map = await svc.editorService.getCompileSynctexMap(id, s.jobId)
+              // normalize into numeric keys
+              const pages: Record<number, Array<{ y: number; line: number }>> = {}
+              if (map && map.pages) {
+                for (const k of Object.keys(map.pages)) {
+                  const arr = (map.pages as any)[k] as Array<any>
+                  const parsed = arr.map(it => ({ y: Number(it.y), line: Number(it.line) }))
+                  pages[Number(k)] = parsed
+                }
+              }
+              setSynctexMap(pages)
+            } catch (e) {
+              // it's OK if map isn't present; we'll fallback to proportional mapping
+              setSynctexMap(null)
+            }
           })()
           return
         }
@@ -263,8 +282,21 @@ export const EditorPage: React.FC = () => {
         }
         // PDF viewer posts { type: 'pdf-click', page: n, y: 0..1 }
         if (d && d.type === 'pdf-click' && typeof d.y === 'number') {
-          // approximate mapping: proportion of page height -> document line
           try {
+            const page = Number(d.page || 1)
+            // if we have a parsed SyncTeX map, use nearest-match; otherwise fall back to proportion
+            if (synctexMap && synctexMap[page] && synctexMap[page].length > 0) {
+              const list = synctexMap[page]
+              let best = list[0]
+              let bestDiff = Math.abs(list[0].y - d.y)
+              for (let i = 1; i < list.length; i++) {
+                const diff = Math.abs(list[i].y - d.y)
+                if (diff < bestDiff) { bestDiff = diff; best = list[i] }
+              }
+              editorRef.current?.goToLine(best.line)
+              return
+            }
+            // proportional fallback
             const txt = editorRef.current?.getValue() || ''
             const totalLines = Math.max(1, txt.split('\n').length)
             const line = Math.max(1, Math.min(totalLines, Math.round(d.y * totalLines)))

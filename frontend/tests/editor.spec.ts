@@ -191,8 +191,18 @@ test.describe('Editor (Phase‑03)', () => {
         }
       })
       await page.route('**/api/documents/CREATED_DOC/preview', async (route) => {
-        await route.fulfill({ status: 200, contentType: 'text/html', body: `<!doctype html><html><head><meta charset="utf-8"><title>Preview</title>
-<script>function sendLine(line){ parent.postMessage({ type: 'synctex-click', line: line }, '*') }</n/ script></head><body><h1>PDF preview (stub)</h1><div id="pdf" style="height:300px;overflow:auto;border:1px solid #ddd;padding:8px;"><p data-line="1">Top (line 1)</p><p data-line="5">Middle (line 5)</p><p data-line="10">Bottom (line 10)</p></div><script>document.getElementById('pdf').addEventListener('click', function(e){ var t = e.target; var line = t.dataset && t.dataset.line ? Number(t.dataset.line) : 1; parent.postMessage({type:'synctex-click', line: line}, '*') })</script></body></html>` })
+        // preview stub now posts `pdf-click` with a y fraction so frontend mapping is exercised
+        await route.fulfill({ status: 200, contentType: 'text/html', body: `<!doctype html><html><head><meta charset="utf-8"><title>Preview</title></head><body><h1>PDF preview (stub)</h1><div id="pdf" style="height:300px;overflow:auto;border:1px solid #ddd;padding:8px;">
+<p data-line="1" data-y="0.05">Top (line 1)</p>
+<p data-line="5" data-y="0.45">Middle (line 5)</p>
+<p data-line="10" data-y="0.95">Bottom (line 10)</p>
+</div>
+<script>
+  document.getElementById('pdf').addEventListener('click', function(e){
+    var t = e.target; var y = t.dataset && t.dataset.y ? Number(t.dataset.y) : 0.5; var page = 1;
+    parent.postMessage({ type: 'pdf-click', page: page, y: y }, '*')
+  })
+</script></body></html>` })
       })
 
       // respond to SyncTeX download (gzipped stub)
@@ -200,6 +210,11 @@ test.describe('Editor (Phase‑03)', () => {
         const zlib = require('zlib')
         const gz = zlib.gzipSync('SyncTeX Version:1\nInput:main.tex\nOutput:main.pdf\n')
         await route.fulfill({ status: 200, contentType: 'application/gzip', body: gz })
+      })
+
+      // respond to SyncTeX *map* request with a best-effort JSON mapping
+      await page.route('**/api/documents/CREATED_DOC/compile/*/synctex/map', async (route) => {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ pages: { "1": [ { "y": 0.05, "line": 1 }, { "y": 0.45, "line": 5 }, { "y": 0.95, "line": 10 } ] } }) })
       })
 
       // click Compile -> should show compiling + logs, then iframe appears
