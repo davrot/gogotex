@@ -57,6 +57,14 @@ var (
 // RegisterDocumentRoutes registers minimal document endpoints used by the
 // Phase-03 frontend prototype (create, get, update).
 func RegisterDocumentRoutes(r *gin.Engine) {
+	// If an *external* go-document service is configured/used by the
+	// deployment then the auth service must NOT register the Phase‑03
+	// in-memory endpoints (nginx will proxy /api/documents → external).
+	if os.Getenv("DOC_SERVICE_EXTERNAL") == "true" {
+		// external service will handle /api/documents — nothing to register here
+		return
+	}
+
 	// Opt-in: if DOC_SERVICE_INLINE=true then register the internal document
 	// service handlers (persistent memory/Mongo-backed) instead of the
 	// Phase‑03 in-memory prototype. This lets CI/dev run a persisted
@@ -68,6 +76,7 @@ func RegisterDocumentRoutes(r *gin.Engine) {
 		return
 	}
 
+	// --- Default Phase‑03 in-memory document endpoints (prototype) ---
 	// List documents (lightweight)
 	r.GET("/api/documents", ListDocuments)
 	r.POST("/api/documents", CreateDocument)

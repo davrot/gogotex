@@ -49,6 +49,7 @@ jobs:
           FAIL_ON_AUTH_CODE: "true"
           DOCKER_TEX_IMAGE: "blang/latex:ubuntu"
           START_TEXLIVE: "true"
+          DOC_SERVICE_EXTERNAL: "true"
         run: |
           chmod +x ./scripts/ci/auth-integration-test.sh
           ./scripts/ci/auth-integration-test.sh

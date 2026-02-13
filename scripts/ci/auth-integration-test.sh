@@ -256,6 +256,7 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
       -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
       -e REDIS_HOST=redis-redis -e REDIS_PORT=6379 -e RATE_LIMIT_USE_REDIS=true \
       -e DOC_SERVICE_INLINE="${DOC_SERVICE_INLINE:-false}" \
+      -e DOC_SERVICE_EXTERNAL="${DOC_SERVICE_EXTERNAL:-false}" \
       "$AUTH_IMAGE"; then
       echo "ERROR: failed to start auth container"; exit 5
     fi
@@ -420,6 +421,12 @@ CODE=""
 REDIRECT_URI=""
 
 # Option: FORCE_CB_SINK=true will use an HTTP callback sink (cb-sink) to capture the authorization code
+# Determine which doc service to call for smoke tests: external service takes precedence
+DOC_SERVICE_HOST="$AUTH_HOST"
+if [ "${DOC_SERVICE_EXTERNAL:-false}" = "true" ]; then
+  DOC_SERVICE_HOST="gogotex-go-document:5010"
+fi
+
 if [ "${FORCE_CB_SINK:-false}" = "true" ]; then
   echo "FORCE_CB_SINK=true: using callback sink to capture authorization code"
   docker rm -f cb-sink >/dev/null 2>&1 || true
