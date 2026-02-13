@@ -642,9 +642,9 @@ func GetSyncTeXLookup(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"page": 1, "y": y, "line": ln})
 }
 
-// parseSynctexMapFromGzip attempts to extract simple page->(y,line) mappings
-// from a gzipped SyncTeX payload. This is best-effort and accepts a few
-// common textual patterns; if nothing useful is found an error is returned.
+// parseSynctexMapFromGzip attempts to extract page->(y,line) mappings from a
+// gzipped SyncTeX payload. It supports several textual variants and will
+// synthesize reasonable `y` values when only page+line pairs are available.
 func parseSynctexMapFromGzip(gz []byte) (map[int][]SyncEntry, error) {
 	gr, err := gzip.NewReader(bytes.NewReader(gz))
 	if err != nil {
@@ -657,25 +657,63 @@ func parseSynctexMapFromGzip(gz []byte) (map[int][]SyncEntry, error) {
 	}
 	s := string(b)
 
-	// pattern: page:<p> line:<n> y:<float>
-	re := regexp.MustCompile(`(?i)page[:=]\s*(\d+)\s+line[:=]\s*(\d+)\s+y[:=]\s*([0-9]*\.?[0-9]+)`) 
-	matches := re.FindAllStringSubmatch(s, -1)
-	if len(matches) == 0 {
-		// try a looser pattern: "line <n>.*page <p>.*y=<float>" in arbitrary order
-		re2 := regexp.MustCompile(`(?i)line\s*(\d+).*?page\s*(\d+).*?y[:=]\s*([0-9]*\.?[0-9]+)`) 
-		matches = re2.FindAllStringSubmatch(s, -1)
+	// Try multiple regex flavors to capture (page, line, optional y)
+	patterns := []*regexp.Regexp{
+		// explicit: page:1 line:5 y:0.45
+		regexp.MustCompile(`(?i)page[:=]?\s*(\d+)[^\S\n\r]{0,20}line[:=]?\s*(\d+)[^\S\n\r]{0,20}y[:=]?\s*([0-9]*\.?[0-9]+)`),
+		// variant: Page 1, Line 5, y=0.45
+		regexp.MustCompile(`(?i)page[:\s]+(\d+)[^\n\r]{0,40}line[:\s]+(\d+)[^\n\r]{0,40}y[:=]\s*([0-9]*\.?[0-9]+)`),
+		// short tags: p:1 l:5 v:0.45 or p=1 l=5 y=0.45
+		regexp.MustCompile(`(?i)\b(?:p|page)[:=]?\s*(\d+)\b[^{\n\r]{0,30}\b(?:l|line)[:=]?\s*(\d+)\b[^{\n\r]{0,30}\b(?:v|y|vert)[:=]?\s*([0-9]*\.?[0-9]+)`),
 	}
-	if len(matches) == 0 {
-		return nil, fmt.Errorf("no synctex map patterns found")
+
+	// map: page -> line -> y (y==0 means unknown)
+	intermediate := map[int]map[int]float64{}
+
+	for _, re := range patterns {
+		for _, m := range re.FindAllStringSubmatch(s, -1) {
+			p, _ := strconv.Atoi(m[1])
+			ln, _ := strconv.Atoi(m[2])
+			y, _ := strconv.ParseFloat(m[3], 64)
+			if y < 0 { y = 0 }
+			if y > 1 { y = 1 }
+			if _, ok := intermediate[p]; !ok { intermediate[p] = map[int]float64{} }
+			if _, exists := intermediate[p][ln]; !exists { intermediate[p][ln] = y }
+		}
 	}
-	out := map[int][]SyncEntry{}
-	for _, m := range matches {
+
+	// Looser capture: page+line pairs without y
+	reNoY := regexp.MustCompile(`(?i)\b(?:page)[:=]?\s*(\d+)[^\S\n\r]{0,40}(?:line|l)[:=]?\s*(\d+)`)
+	for _, m := range reNoY.FindAllStringSubmatch(s, -1) {
 		p, _ := strconv.Atoi(m[1])
 		ln, _ := strconv.Atoi(m[2])
-		y, _ := strconv.ParseFloat(m[3], 64)
-		if y < 0 { y = 0 }
-		if y > 1 { y = 1 }
-		out[p] = append(out[p], SyncEntry{Y: y, Line: ln})
+		if _, ok := intermediate[p]; !ok { intermediate[p] = map[int]float64{} }
+		if _, exists := intermediate[p][ln]; !exists { intermediate[p][ln] = 0.0 }
+	}
+
+	if len(intermediate) == 0 {
+		return nil, fmt.Errorf("no synctex map patterns found")
+	}
+
+	// Convert to final map[int][]SyncEntry, synthesizing y for unknowns by
+	// ordering lines within a page and spacing them evenly.
+	out := map[int][]SyncEntry{}
+	for p, lines := range intermediate {
+		// collect and sort line numbers
+		var keys []int
+		for ln := range lines { keys = append(keys, ln) }
+		sort.Ints(keys)
+		n := float64(len(keys))
+		for i, ln := range keys {
+			y := lines[ln]
+			if y == 0 {
+				// evenly interpolate position
+				y = (float64(i) + 0.5) / n
+				if y < 0 { y = 0 }
+				if y > 1 { y = 1 }
+			}
+			out[p] = append(out[p], SyncEntry{Y: y, Line: ln})
+		}
 	}
 	return out, nil
 }

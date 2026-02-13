@@ -313,3 +313,65 @@ func TestParseSynctexGzipFallback(t *testing.T) {
 	require.InDelta(t, 0.05, first["y"].(float64), 1e-6)
 	require.Equal(t, float64(1), first["line"].(float64))
 }
+
+func TestParseSynctexGzipRobustPatterns(t *testing.T) {
+	g := gin.New()
+	RegisterDocumentRoutes(g)
+
+	// create a document
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/documents", strings.NewReader(`{"name":"s2.tex","content":"l1\nl2\nl3\nl4\nl5\nl6\n"}`))
+	req.Header.Set("Content-Type", "application/json")
+	g.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+	var cr map[string]string
+	err := json.Unmarshal(w.Body.Bytes(), &cr)
+	require.NoError(t, err)
+	id := cr["id"]
+
+	// craft gzipped synctex with multiple pattern variants
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	gw.Write([]byte("SyncTeX Version:1\nInput:main.tex\n"))
+	// variant A: explicit page/line/y
+	gw.Write([]byte("page:1 line:2 y:0.12\n"))
+	// variant B: different spacing/capitalization
+	gw.Write([]byte("Page 1, Line 5, y=0.45\n"))
+	// variant C: page+line without y (parser should synthesize y)
+	gw.Write([]byte("line 3 page 1\n"))
+	// different page
+	gw.Write([]byte("p:2 l:1 v:0.5\n"))
+	gw.Close()
+
+	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
+	job := &CompileJob{JobID: jobID, DocID: id, Status: "ready", Logs: "ok", CreatedAt: time.Now(), Synctex: buf.Bytes(), PDF: minimalPDF()}
+	compileJobsMu.Lock()
+	compileJobs[jobID] = job
+	compileJobsMu.Unlock()
+
+	// request synctex map -> should parse and return entries for page1 and page2
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex/map", id, jobID), nil)
+	g.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	pages := resp["pages"].(map[string]interface{})
+	p1 := pages["1"].([]interface{})
+	p2 := pages["2"].([]interface{})
+	// page 1 should contain lines 2,3,5
+	foundLines := map[int]bool{}
+	for _, it := range p1 {
+		m := it.(map[string]interface{})
+		ln := int(m["line"].(float64))
+		foundLines[ln] = true
+	}
+	require.True(t, foundLines[2])
+	require.True(t, foundLines[3])
+	require.True(t, foundLines[5])
+	// page 2 should contain line 1 with y approx 0.5
+	m2 := p2[0].(map[string]interface{})
+	require.Equal(t, float64(1), m2["line"].(float64))
+	require.InDelta(t, 0.5, m2["y"].(float64), 0.001)
+}
