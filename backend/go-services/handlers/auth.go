@@ -82,6 +82,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "code and redirect_uri required for auth_code mode"})
 			return
 		}
+		// log a safe, truncated diagnostic to help CI debugging (do not log full secrets)
+		logger.Debugf("Login(auth_code): received code length=%d redirect_uri=%s", len(req.Code), req.RedirectURI)
 		tokenResp, err = requestAuthCodeToken(c.Request.Context(), host, realm, h.cfg.Keycloak.ClientID, h.cfg.Keycloak.ClientSecret, req.Code, req.RedirectURI)
 		if err != nil {
 			// log token exchange error with redirect URI for easier debugging in CI/integration runs
@@ -120,7 +122,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create access token"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"access_token": access, "refresh_token": rft, "expires_in": 900})
+	// Return camelCase response to match frontend `LoginResponse` shape
+	c.JSON(http.StatusOK, gin.H{"accessToken": access, "refreshToken": rft, "user": u, "expiresIn": 900})
 }
 
 // Refresh accepts a refresh token and returns a new access token
@@ -279,9 +282,51 @@ func requestAuthCodeToken(ctx context.Context, host, realm, clientID, clientSecr
 	}
 
 	// Try the token exchange; if we get a transient 'Code not valid' we retry once (reduces flakiness in CI)
+	logger.Infof("requestAuthCodeToken: tokenURL=%s client_id=%s client_secret_set=%t redirect_uri=%s", tokenURL, clientID, clientSecret != "", redirectURI)
 	for attempt := 1; attempt <= 2; attempt++ {
+		// Use HTTP Basic auth for client authentication (more robust across Keycloak configs)
 		form := urlValues(formValues)
-		resp, err := http.Post(tokenURL, "application/x-www-form-urlencoded", form)
+		req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, form)
+		if err != nil {
+			if attempt == 2 {
+				return nil, err
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		// Diagnostic: log the outgoing token request (without secrets) to aid CI debugging
+		fv := map[string]string{}
+		for k, v := range formValues {
+			if k == "client_secret" {
+				fv[k] = "<redacted>"
+			} else if k == "code" {
+				fv[k] = fmt.Sprintf("<len=%d>", len(v))
+			} else {
+				fv[k] = v
+			}
+		}
+		logger.Debugf("requestAuthCodeToken: POST %s form=%v", tokenURL, fv)
+		// Also emit an INFO-level redacted form so CI logs always capture the outgoing
+		// parameters even when DEBUG logs are filtered.
+		logger.Infof("requestAuthCodeToken: outgoing-form-redacted=%v", fv)
+		// Primary attempt: use client_secret in form body (client_secret_post).
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode == http.StatusUnauthorized {
+			// If Keycloak rejects client credentials for client_secret_post, retry using HTTP Basic auth.
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			bodyStr := string(b)
+			logger.Warnf("requestAuthCodeToken: primary exchange returned 401, retrying with HTTP Basic; keycloak_resp=%s", strings.TrimSpace(bodyStr))
+			// build a new request and try Basic auth
+			form2 := urlValues(formValues)
+			req2, err2 := http.NewRequestWithContext(ctx, "POST", tokenURL, form2)
+			if err2 == nil {
+				req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				req2.SetBasicAuth(clientID, clientSecret)
+				resp, err = http.DefaultClient.Do(req2)
+			}
+		}
 		if err != nil {
 			if attempt == 2 {
 				return nil, err

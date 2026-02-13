@@ -17,8 +17,13 @@ test('auth-code E2E: browser -> Keycloak -> frontend callback -> backend exchang
     try {
       const req = response.request()
       if (req.method() === 'POST' && req.url().includes('/auth/login')) {
-        if (response.status() === 200) {
-          loginResponseBody = await response.json()
+        // capture response body for both success and failure to aid debugging
+        const status = response.status()
+        let body = null
+        try { body = await response.text() } catch (e) { /* ignore */ }
+        console.log('DEBUG: /auth/login -> status=' + status + ' body=' + (body || '<empty>'))
+        if (status === 200) {
+          loginResponseBody = JSON.parse(body || '{}')
         }
       }
     } catch (err) {
@@ -36,12 +41,32 @@ test('auth-code E2E: browser -> Keycloak -> frontend callback -> backend exchang
   console.log('DEBUG: page content snippet ->', snippet)
   await page.fill('input[name="username"]', TEST_USER)
   await page.fill('input[name="password"]', TEST_PASS)
+  // observe the outgoing auth callback navigation and capture the 'code' for diagnostics
   await Promise.all([
     page.waitForNavigation({ url: new RegExp(redirectUri.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')) }),
     page.click('button[type=submit], input[type=submit], button#kc-login'),
   ])
 
+  // DEBUG: print the callback URL (includes authorization code) so CI logs can reproduce token exchanges
+  console.log('DEBUG: callback URL ->', page.url())
+
+  // Assert frontend POST to /auth/login contains required mode field (prevents regressions)
+  let sawAuthLoginRequest = false
+  page.on('request', (req) => {
+    try {
+      if (req.method() === 'POST' && req.url().includes('/auth/login')) {
+        const pd = req.postData() || ''
+        if (pd.includes('"mode":"auth_code"')) {
+          sawAuthLoginRequest = true
+        }
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  })
+
   await page.waitForTimeout(500)
+  expect(sawAuthLoginRequest).toBeTruthy()
   expect(loginResponseBody).not.toBeNull()
   expect(loginResponseBody.accessToken).toBeTruthy()
   expect(loginResponseBody.user).toBeTruthy()

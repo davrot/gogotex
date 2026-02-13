@@ -25,9 +25,8 @@ services:
       KC_PROXY_ADDRESS_FORWARDING: true
       KC_PROXY: edge
       KC_PROXY_HEADERS: xforwarded
-
-    command: start-dev
-
+      # Allow overriding Quarkus log level via KEYCLOAK_LOG_LEVEL (defaults to INFO)
+      QUARKUS_LOG_LEVEL: ${KEYCLOAK_LOG_LEVEL:-INFO}
     networks:
       - tex-network
 

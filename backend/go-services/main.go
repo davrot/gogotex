@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"strings"
 	"os"
+	"go.mongodb.org/mongo-driver/mongo"
 	"github.com/gogotex/gogotex/backend/go-services/internal/database"
 	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
 	"github.com/gogotex/gogotex/backend/go-services/internal/users"
@@ -42,6 +43,20 @@ func main() {
 
 	r := gin.New()
 logger.Infof("MAIN checkpoint: after gin.New()")
+
+	// Lightweight CORS middleware for dev/test: set common headers and respond to OPTIONS.
+	// (Keep this intentionally simple — production should use a stricter policy.)
+	r.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Length")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(200)
+			return
+		}
+		c.Next()
+	})
 
 	// shared runtime vars used by handlers/readiness
 	var verifier middleware.Verifier
@@ -178,20 +193,41 @@ if importedRedis != nil {
 	logger.Infof("Using Redis for session storage (early connection)")
 }
 
-// Fallback: MongoDB-backed services (users + sessions)
-if sessionsSvc == nil && cfg.MongoDB.URI != "" {
-	client, err := database.ConnectMongo(ctx, cfg.MongoDB.URI, cfg.MongoDB.Timeout)
-	if err != nil {
-		logger.Warnf("failed to connect to MongoDB: %v", err)
+// MongoDB-backed services (users + sessions)
+// Attempt Mongo connection when configured. If Redis provided sessionsSvc already,
+// still create the user service from Mongo if available (fixes missing auth handlers
+// when Redis is used for sessions).
+if cfg.MongoDB.URI != "" {
+	// Retry/backoff when connecting to MongoDB to tolerate startup races
+	const maxAttempts = 5
+	backoff := time.Second
+	var client *mongo.Client
+	var errConn error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		client, errConn = database.ConnectMongo(ctx, cfg.MongoDB.URI, cfg.MongoDB.Timeout)
+		if errConn == nil {
+			break
+		}
+		logger.Warnf("attempt %d/%d: failed to connect to MongoDB: %v", attempt, maxAttempts, errConn)
+		if attempt < maxAttempts {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+	}
+	if errConn != nil {
+		logger.Warnf("could not connect to MongoDB after %d attempts: %v", maxAttempts, errConn)
 	} else {
 		defer func() { _ = client.Disconnect(ctx) }()
 		usersCol := client.Database(cfg.MongoDB.Database).Collection("users")
 		repo := users.NewMongoUserRepository(usersCol)
 		userSvc = users.NewService(repo)
 
-		sessionsCol := client.Database(cfg.MongoDB.Database).Collection("sessions")
-		srepo := sessions.NewMongoRepository(sessionsCol)
-		sessionsSvc = sessions.NewService(srepo)
+		// only create Mongo-backed session repo when a session service isn't already set
+		if sessionsSvc == nil {
+			sessionsCol := client.Database(cfg.MongoDB.Database).Collection("sessions")
+			srepo := sessions.NewMongoRepository(sessionsCol)
+			sessionsSvc = sessions.NewService(srepo)
+		}
 	}
 }
 
@@ -202,7 +238,8 @@ if userSvc != nil && sessionsSvc != nil {
 	h.Register(r.Group("/"))
 } else {
 	logger.Warnf("auth handlers not registered because user/sessions services are unavailable")
-}
+}// Register minimal Swagger UI + JSON for API documentation (Phase-02 requirement)
+handlers.RegisterSwagger(r)
 logger.Infof("MAIN checkpoint: after registering handlers")
 	api := r.Group("/api/v1")
 	if verifier != nil {

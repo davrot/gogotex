@@ -34,3 +34,15 @@ func TestBlacklistAccessToken_IsAccessTokenBlacklisted(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok2)
 }
+
+// Ensure blacklist functions are no-ops when no Redis client configured
+func TestBlacklist_NoClient_Noop(t *testing.T) {
+	// ensure no client set
+	SetBlacklistClient(nil)
+	ctx := context.Background()
+	token := "no-client-token"
+	require.NoError(t, BlacklistAccessToken(ctx, token, 1*time.Second))
+	ok, err := IsAccessTokenBlacklisted(ctx, token)
+	require.NoError(t, err)
+	require.False(t, ok)
+}

@@ -10,7 +10,7 @@ export const authService = {
     const resp = await fetch((import.meta.env.VITE_AUTH_URL || 'http://localhost:8081') + '/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, redirect_uri: import.meta.env.VITE_REDIRECT_URI || 'http://localhost:3000/auth/callback' }),
+      body: JSON.stringify({ mode: 'auth_code', code, redirect_uri: import.meta.env.VITE_REDIRECT_URI || 'http://localhost:3000/auth/callback' }),
     })
     if (!resp.ok) {
       const body = await resp.text()

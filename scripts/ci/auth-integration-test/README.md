@@ -26,3 +26,14 @@ Timeout semantics:
 Where artifacts land:
 - Playwright writes test artifacts (screenshots / traces / junit) into `frontend/test-results`.
 - The integration script saves diagnostic logs under `test-output/` on failures.
+
+Playwright cached test image (optional, recommended)
+- Build once locally / in CI to avoid re-installing Node deps and Playwright browsers on every run:
+
+    docker build -t gogotex/playwright:ci -f test_tools/playwright-runner/Dockerfile .
+
+- `playwright.sh` will automatically prefer `gogotex/playwright:ci` when present. To force the official image use:
+
+    PLAYWRIGHT_FORCE_OFFICIAL=true ./scripts/ci/auth-integration-test/playwright.sh
+
+This reduces test run time and network downloads in CI. (The image places pre-baked node_modules at `/prebaked_node_modules` and the runner copies them into the mounted `/app` when needed.)

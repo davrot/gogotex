@@ -13,6 +13,10 @@ services:
       - MONGODB_URI=mongodb://mongodb-mongodb:27017
       - MONGODB_DATABASE=gogotex
 
+    # publish container port 8081 to host 5001 for local development (http://localhost:5001)
+    ports:
+      - "5001:8081"
+
     networks:
       - tex-network
 

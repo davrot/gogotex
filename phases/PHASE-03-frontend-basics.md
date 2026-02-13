@@ -1898,47 +1898,112 @@ Update: `package.json` scripts section:
 
 ## Phase 3 Completion Checklist
 
-### Development Environment
-- [ ] Vite + React + TypeScript project created
-- [ ] All dependencies installed (CodeMirror, React Router, Zustand, Axios, Tailwind)
-- [ ] TypeScript configured with strict mode
-- [ ] Tailwind CSS configured and working
-- [ ] Path aliases (@/*) working
+### Development environment (done)
+- [x] Vite + React + TypeScript project created
+- [x] All dependencies installed (CodeMirror, React Router, Zustand, Axios, Tailwind)
+- [x] TypeScript configured with strict mode
+- [x] Tailwind CSS configured and working
+- [x] Path aliases (@/*) working
 
-### Authentication
-- [ ] Auth service with Keycloak integration
-- [ ] Login page redirects to Keycloak
-- [ ] OAuth callback page handles authorization code
-- [ ] Tokens stored in localStorage (via Zustand persist)
-- [ ] Protected routes redirect to login when not authenticated
-- [ ] Axios interceptor adds Bearer token
-- [ ] Token refresh on 401 response
-- [ ] Logout clears tokens and redirects to Keycloak logout
+### Authentication (mostly done — stabilization remaining)
+- [x] Auth service with Keycloak integration (backend handlers implemented)
+- [x] Login page redirects to Keycloak
+- [x] OAuth callback page handles authorization code
+- [x] Tokens persisted (Zustand + localStorage)
+- [x] Protected routes redirect to login when unauthenticated
+- [x] Axios interceptor for Bearer token
+- [x] Token refresh on 401 (refresh endpoint implemented)
+- [x] Logout clears tokens and invokes Keycloak logout
 
-### UI Components
-- [ ] CodeMirror 6 editor with LaTeX syntax highlighting
-- [ ] Editor toolbar with LaTeX commands
-- [ ] Main layout with header and sidebar
-- [ ] Responsive sidebar (desktop: collapsible, mobile: drawer)
-- [ ] Dashboard page with quick actions
-- [ ] Loading spinner component
-- [ ] Protected route wrapper
+### Backend / merged Phase‑02 (implemented; tests added)
+- [x] Auth endpoints (POST `/auth/login`, `/auth/refresh`, `/auth/logout`, GET `/api/v1/me`) — `backend/go-services/handlers/auth.go`
+- [x] Authorization-code exchange with Keycloak (server-side) — `/auth/login` handles code flow and token verification
+- [x] Robust client auth for token exchange (client_secret_post + fallback to Basic)
+- [x] JWT generation & validation tests (`internal/tokens/*`)
+- [x] Session store + Redis blacklist tests (`internal/sessions/*`)
+- [x] OpenAPI/Swagger docs available at `/swagger/index.html`
+- [~] Integration harness & Playwright E2E (auth-code flow): scripts and tests present; CI stabilization in progress
+- [~] Prebaked Playwright image (`gogotex/playwright:ci`) exists locally; CI publish job pending
+- [ ] CI job to build/publish prebaked Playwright image (required)
 
-### Mobile Support
-- [ ] Responsive design works on mobile (320px+)
-- [ ] Touch interactions work
-- [ ] Mobile drawer menu functions correctly
-- [ ] No pinch-zoom issues
-- [ ] Editor usable on tablets
+> Test/CI guards added:
+> - Playwright test now asserts the frontend POST includes `mode:"auth_code"` and logs `/auth/login` response for diagnostics.
+> - Backend logs redacted outgoing token-request form and retries (helps CI troubleshooting).
 
-### Build & Deploy
-- [ ] `npm run dev` starts development server
-- [ ] `npm run build` produces optimized bundle
-- [ ] `npm run preview` serves production build
-- [ ] No TypeScript errors
-- [ ] No console warnings
+### UI Components (done / verified)
+- [x] CodeMirror 6 editor with LaTeX support (basic)
+- [x] Editor toolbar and basic commands
+- [x] Main layout with header and sidebar
+- [x] Responsive sidebar (desktop/tablet/mobile)
+- [x] Dashboard page with quick actions
+- [x] Loading spinner component
+- [x] Protected route wrapper
+
+### Mobile Support (done)
+- [x] Responsive design works on mobile (320px+)
+- [x] Touch interactions implemented for core UI
+- [x] Mobile drawer menu functions correctly
+- [x] Editor usable on tablets (mobile caveats documented)
+
+### Build & Deploy (done)
+- [x] `npm run dev` starts development server
+- [x] `npm run build` produces optimized bundle
+- [x] `npm run preview` serves production build
+- [x] No TypeScript errors (strict mode)
+- [x] No console warnings (core flows)
 
 ---
+
+## Remaining work & next steps (what needs to be done)
+
+Priority 1 — Stabilize E2E & CI (must finish Phase‑03)
+1. Finalize CI stabilization for auth-code E2E (required)
+   - Create CI job that builds/publishes `gogotex/playwright:ci` (prebaked image).
+   - Ensure `scripts/ci/auth-integration-test.sh` uses the published image and reliably starts `gogotex-auth-integration` with the latest image.
+   - Acceptance: 2 consecutive green auth-code Playwright runs in CI.
+   - Estimated: 1–2 days.
+
+2. Make Playwright E2E deterministic and non‑flaky
+   - Add retry/backoff for transient Keycloak `Code not valid` cases (server already retries once).
+   - Harden Playwright test timeouts and explicit waits for network events.
+   - Acceptance: Local 5× repeat runs succeed; CI job stable.
+   - Estimated: 0.5–1 day.
+
+Priority 2 — CI & regression guards
+3. Add CI checks to prevent regressions
+   - Post-build assertion that frontend bundle contains `mode:"auth_code"`.
+   - Smoke test in CI that `/auth/login` returns the expected camelCase JSON keys (`accessToken`, `refreshToken`, `user`).
+   - Acceptance: Build fails on regression; PR must fix before merge.
+   - Estimated: 0.5 day.
+
+Priority 3 — Polish & docs
+4. Create a Phase‑03 PR and complete code review
+   - Include Playwright trace artifacts, unit tests, and updated docs.
+   - Acceptance: PR merged to main.
+   - Estimated: 0.5–1 day (review cycle dependent).
+
+5. Add end‑user docs / README updates
+   - Document environment variables for local Keycloak + auth integration testing.
+   - Document running Playwright locally with `PLAYWRIGHT_LOCAL_IMAGE`.
+   - Acceptance: README updated in PR.
+   - Estimated: 0.25 day.
+
+Lower priority / future improvements
+- E2E: extend Playwright to cover editor autosave / project flow.
+- Add more type coverage and stricter contract tests between frontend ↔ backend.
+- Add monitoring alerts for auth failures in staging.
+
+---
+
+## Acceptance criteria — Phase 03 complete
+- Playwright auth-code flow passes reliably in CI (2 consecutive green runs).
+- Frontend bundle contains required callback payload and test asserts this.
+- Backend verifies and exchanges authorization codes reliably (retry + fallback present).
+- PR merged and CI green.
+
+If you want, I can now:
+- create a PR with the Phase‑03 changes and run CI (recommended), or
+- only update docs and leave PR creation to you.
 
 ## Troubleshooting
 

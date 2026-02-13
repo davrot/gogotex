@@ -64,3 +64,24 @@ func TestCreateAndValidateSession(t *testing.T) {
 		t.Fatalf("expected session removed")
 	}
 }
+
+func TestValidateRefresh_Expired(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo)
+	ctx := context.Background()
+	// create a session with past expiry
+	s := &Session{RefreshToken: "r-exp", Sub: "s1", ExpiresAt: time.Now().Add(-1 * time.Hour)}
+	repo.store = map[string]*Session{"r-exp": s}
+
+	res, err := svc.ValidateRefresh(ctx, "r-exp")
+	if err != nil {
+		t.Fatalf("ValidateRefresh error: %v", err)
+	}
+	if res != nil {
+		t.Fatalf("expected expired session to be nil")
+	}
+	// ensure repo no longer contains it
+	if _, ok := repo.store["r-exp"]; ok {
+		t.Fatalf("expected expired session to be deleted by ValidateRefresh")
+	}
+}

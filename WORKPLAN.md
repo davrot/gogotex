@@ -13,7 +13,6 @@ gogotex/
 ├── DECISIONS.md                   # Can be deleted (integrated into plan.md)
 ├── phases/
 │   ├── PHASE-01-infrastructure.md      # Docker Compose, databases, Keycloak
-│   ├── PHASE-02-go-auth-service.md     # Authentication service in Go
 │   ├── PHASE-03-frontend-basics.md     # React + CodeMirror 6 setup
 │   ├── PHASE-04-realtime-collab.md     # Node.js Yjs server + integration
 │   ├── PHASE-05-document-service.md    # Go document CRUD + MinIO
@@ -40,19 +39,11 @@ gogotex/
 
 ---
 
-### Phase 2: Go Authentication Service (2-3 days)
-**File**: `phases/PHASE-02-go-auth-service.md`
+### Phase 2: Go Authentication Service (merged → see Phase 3)
 
-- Go project structure
-- OIDC integration with Keycloak
-- JWT token generation and validation
-- User registration and login endpoints
-- MongoDB user model
-- Rate limiting middleware
-- OpenAPI/Swagger documentation
-- Unit tests
+The tasks from Phase 2 have been merged into `phases/PHASE-03-frontend-basics.md` and implemented as part of the current codebase (auth service, JWTs, OpenAPI, tests, and integration harness).
 
-**Deliverable**: Working auth API with JWT tokens
+**Status**: Completed and consolidated into Phase 3 — `phases/PHASE-02-go-auth-service.md` removed/archived.
 
 ---
 

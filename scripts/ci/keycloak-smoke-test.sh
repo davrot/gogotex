@@ -41,14 +41,24 @@ if [ -z "$NET" ]; then
 fi
 
 # Wait for Keycloak token endpoint to respond with something other than 404/empty
+# Configurable: KEYCLOAK_HTTP_WAIT_SECS, KEYCLOAK_POLL_INTERVAL, KEYCLOAK_CURL_TIMEOUT
+KEYCLOAK_HTTP_WAIT_SECS=${KEYCLOAK_HTTP_WAIT_SECS:-120}
+KEYCLOAK_POLL_INTERVAL=${KEYCLOAK_POLL_INTERVAL:-2}
+KEYCLOAK_CURL_TIMEOUT=${KEYCLOAK_CURL_TIMEOUT:-5}
+MAX_TRIES=$(( (KEYCLOAK_HTTP_WAIT_SECS + KEYCLOAK_POLL_INTERVAL - 1) / KEYCLOAK_POLL_INTERVAL ))
+
 echo "Waiting for Keycloak to be ready (token endpoint) on network $NET..."
-for i in {1..60}; do
-  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://keycloak-keycloak:8080/sso/)
+for i in $(seq 1 "$MAX_TRIES"); do
+  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS --max-time "$KEYCLOAK_CURL_TIMEOUT" -o /dev/null -w "%{http_code}" http://keycloak-keycloak:8080/sso/ 2>/dev/null || echo 000)
   if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "400" ]; then
     echo "Keycloak HTTP response: $HTTP_CODE"; break
   fi
-  echo -n '.'; sleep 2
+  echo -n '.'; sleep "$KEYCLOAK_POLL_INTERVAL"
 done
+if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "302" ] && [ "$HTTP_CODE" != "401" ] && [ "$HTTP_CODE" != "400" ]; then
+  echo "ERROR: Keycloak did not become reachable within ${KEYCLOAK_HTTP_WAIT_SECS}s (last_http_code=$HTTP_CODE)" >&2
+  exit 2
+fi
 
 # Run the setup script inside the Docker network
 echo "Running keycloak setup script inside ephemeral container..."

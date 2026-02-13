@@ -21,6 +21,18 @@ fi
 # dedicated integration runner image use `make integration-runner-image` and then
 # `scripts/ci/run-integration-in-docker.sh`.
 
+# Allow easy enablement of Keycloak debug logs. Set KEYCLOAK_DEBUG=true to restart
+# Keycloak with QUARKUS_LOG_LEVEL=DEBUG (useful for capturing router stacktraces).
+if [ "${KEYCLOAK_DEBUG:-false}" = "true" ]; then
+  echo "KEYCLOAK_DEBUG=true -> will start Keycloak with QUARKUS_LOG_LEVEL=DEBUG" >&2
+  export KEYCLOAK_LOG_LEVEL=${KEYCLOAK_LOG_LEVEL:-DEBUG}
+  # If Keycloak is already running, remove it so infra.sh recreates it with the new env
+  if docker ps --format '{{.Names}}' | grep -q '^keycloak-keycloak$'; then
+    echo "Recreating existing Keycloak container to apply DEBUG log level..." >&2
+    docker rm -f keycloak-keycloak >/dev/null 2>&1 || true
+  fi
+fi
+
 # Start infra (Keycloak + MongoDB) and wait until Keycloak HTTP is reachable.
 # This logic has been extracted to a focused helper script that returns the Docker
 # network name so downstream steps can reuse it.
@@ -44,6 +56,12 @@ docker build \
   --build-arg VITE_REDIRECT_URI=http://frontend/auth/callback \
   -t gogotex-frontend:local "$ROOT_DIR/frontend"
 
+# Quick regression guard: ensure built frontend contains required auth payload (mode=auth_code)
+if ! docker run --rm gogotex-frontend:local sh -c 'cat /usr/share/nginx/html/assets/index-*.js | grep -q "\"mode\":\"auth_code\""'; then
+  echo "ERROR: built frontend bundle missing \"mode:\\"auth_code\" (regression)" >&2
+  exit 8
+fi
+
 echo "Starting frontend service for E2E auth-code test..."
 bash "$ROOT_DIR/gogotex-support-services/up_frontend.sh" || true
 
@@ -51,6 +69,10 @@ bash "$ROOT_DIR/gogotex-support-services/up_frontend.sh" || true
 # This step has its own script for better maintainability and a shell-level timeout
 if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
   echo "Running Playwright E2E test (browser -> Keycloak -> frontend -> auth)..."
+
+  # diagnostics directory (create early so Playwright failure handlers can write logs)
+  DIAG_DIR="${DIAG_DIR:-${ROOT_DIR:-.}/test-output}"
+  mkdir -p "$DIAG_DIR" || true
 
   # avoid unbound-variable under set -u; ensure password file is read if present
   TEST_USER=${TEST_USER:-testuser}
@@ -64,7 +86,30 @@ if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
   if command -v timeout >/dev/null 2>&1; then
     echo "Using 'timeout' wrapper to guard Playwright run" >&2
     if ! timeout ${PLAYWRIGHT_RUN_TIMEOUT}s "$ROOT_DIR/scripts/ci/auth-integration-test/playwright.sh"; then
-      echo "Playwright step timed out or failed (timeout=${PLAYWRIGHT_RUN_TIMEOUT}s)" >&2; docker logs keycloak-keycloak 2>/dev/null | sed -n '1,200p' || true
+      echo "Playwright step timed out or failed (timeout=${PLAYWRIGHT_RUN_TIMEOUT}s)" >&2
+      # capture Keycloak logs for post-mortem
+      docker logs keycloak-keycloak 2>/dev/null | sed -n '1,2000p' > "$DIAG_DIR/keycloak-full.log" || true
+      docker logs keycloak-keycloak 2>/dev/null | tail -n 400 > "$DIAG_DIR/keycloak-last.log" || true
+      echo "Saved Keycloak logs to $DIAG_DIR/keycloak-full.log and keycloak-last.log" >&2
+
+      # extract any 'Unhandled exception in router' occurrences (with surrounding context)
+      if grep -n 'Unhandled exception in router' "$DIAG_DIR/keycloak-full.log" >/dev/null 2>&1; then
+        echo "Detected 'Unhandled exception in router' in Keycloak logs — extracting contexts" >&2
+        : > "$DIAG_DIR/keycloak-unhandled.log"
+        for L in $(grep -n 'Unhandled exception in router' "$DIAG_DIR/keycloak-full.log" | cut -d: -f1); do
+          START=$((L>40?L-40:1))
+          END=$((L+120))
+          sed -n "${START},${END}p" "$DIAG_DIR/keycloak-full.log" >> "$DIAG_DIR/keycloak-unhandled.log"
+          echo -e "\n---\n" >> "$DIAG_DIR/keycloak-unhandled.log"
+        done
+        echo "Saved extracted contexts to $DIAG_DIR/keycloak-unhandled.log" >&2
+      else
+        echo "No 'Unhandled exception in router' lines found in recent Keycloak logs." >&2
+        if [ "${KEYCLOAK_LOG_LEVEL:-INFO}" != "DEBUG" ]; then
+          echo "Tip: re-run with KEYCLOAK_DEBUG=true to enable DEBUG logging for Keycloak and capture full stack traces." >&2
+        fi
+      fi
+
       if [ "${FAIL_ON_AUTH_CODE:-true}" = "true" ]; then
         exit 7
       else
@@ -108,7 +153,7 @@ if [ ! -f "$CLIENT_SECRET_FILE" ]; then
   echo "Client secret file not found: $CLIENT_SECRET_FILE"; exit 4
 fi
 CLIENT_SECRET=$(cat "$CLIENT_SECRET_FILE")
-CLIENT_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "client_id=gogotex-backend" -d "client_secret=$CLIENT_SECRET" -d "grant_type=client_credentials" http://keycloak-keycloak:8080/sso/realms/gogotex/protocol/openid-connect/token | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' || true)
+CLIENT_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS --max-time 10 -X POST -d "client_id=gogotex-backend" -d "client_secret=$CLIENT_SECRET" -d "grant_type=client_credentials" http://keycloak-keycloak:8080/sso/realms/gogotex/protocol/openid-connect/token | sed -n 's/.*"access_token":"\([^\"]*\)".*/\1/p' || true)
 if [ -z "$CLIENT_TOKEN" ]; then
   echo "Failed to obtain client token"; exit 3
 fi
@@ -120,7 +165,7 @@ echo "Verifying Keycloak client configuration for 'gogotex-backend'..."
 ADMIN_PW=$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ROOT_DIR/gogotex-support-services/.env" | sed -E 's/^[^=]+=//')
 ADMIN_TOKEN=""
 if [ -n "$ADMIN_PW" ]; then
-  ADMIN_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "client_id=admin-cli" -d "username=admin" -d "password=$ADMIN_PW" -d "grant_type=password" http://keycloak-keycloak:8080/sso/realms/master/protocol/openid-connect/token | jq -r '.access_token // empty') || true
+  ADMIN_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS --max-time 10 -X POST -d "client_id=admin-cli" -d "username=admin" -d "password=$ADMIN_PW" -d "grant_type=password" http://keycloak-keycloak:8080/sso/realms/master/protocol/openid-connect/token | jq -r '.access_token // empty') || true
 fi
 # Use admin token when available, otherwise use client token for read-only checks.
 AUTH_HEADER="Authorization: Bearer ${ADMIN_TOKEN:-$CLIENT_TOKEN}"
@@ -266,6 +311,12 @@ for i in {1..60}; do
 done
 if [ "$HTTP_CODE" != "200" ]; then
   echo "Auth service did not become ready in time"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,400p'; exit 6
+fi
+
+# verify Swagger UI is served (Phase‑02 requirement)
+SWAG_HTTP=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/swagger/index.html || echo 000)
+if [ "$SWAG_HTTP" != "200" ]; then
+  echo "ERROR: /swagger/index.html not served by auth service (HTTP=$SWAG_HTTP)"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,200p'; exit 7
 fi
 
 # --- Rate-limit + metrics verification (global middleware) ---
@@ -601,7 +652,7 @@ PY" || true)
   echo "Re-captured code: $CODE redirect_uri: $REDIRECT_URI"
 fi
 
-# POST code to auth service (use auth service's /api/v1/auth/login with mode=auth_code)
+# POST code to auth service (use auth service's /auth/login with mode=auth_code)
 # Retry the full headless-capture -> exchange sequence to mitigate transient 'code not valid' or timing races
 # Number of attempts to exchange an authorization code with the auth service
 MAX_ATTEMPTS=${MAX_ATTEMPTS:-5}
@@ -613,7 +664,7 @@ FAIL_ON_AUTH_CODE=${FAIL_ON_AUTH_CODE:-true}
 EXCHANGE_SUCCESS=false
 for attempt in $(seq 1 $MAX_ATTEMPTS); do
   echo "Exchanging code via auth service (attempt $attempt/$MAX_ATTEMPTS)..."
-  LOGIN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d '{"mode":"auth_code","code":"'"$CODE"'","redirect_uri":"'"$REDIRECT_URI"'"}' http://$AUTH_HOST/api/v1/auth/login || true)"$CODE"'","redirect_uri":"'"$REDIRECT_URI"'"}' http://$AUTH_CONTAINER_NAME:8081/api/v1/auth/login || true)
+LOGIN_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d '{"mode":"auth_code","code":"'"$CODE"'"'","redirect_uri":"'"$REDIRECT_URI"'"'}' http://$AUTH_HOST/auth/login || true)"$CODE"'"","redirect_uri":"'"$REDIRECT_URI"'"'}' http://$AUTH_CONTAINER_NAME:8081/auth/login || true)
   if echo "$LOGIN_RESP" | jq -e '.access_token' >/dev/null 2>&1; then
     echo "✅ Auth-code E2E: auth service exchanged code and returned tokens"
     echo "$LOGIN_RESP" | jq .
