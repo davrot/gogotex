@@ -12,6 +12,7 @@ services:
       - KEYCLOAK_CLIENT_ID=gogotex-backend
       - MONGODB_URI=mongodb://mongodb-mongodb:27017
       - MONGODB_DATABASE=gogotex
+      - DOC_SERVICE_INLINE=${DOC_SERVICE_INLINE:-false}
 
     # publish container port 8081 to host 5001 for local development (http://localhost:5001)
     ports:
