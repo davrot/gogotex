@@ -194,4 +194,23 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	b, err := io.ReadAll(gr)
 	require.NoError(t, err)
 	assert.Contains(t, string(b), "SyncTeX")
+
+	// and the new SyncTeX map endpoint should return per-line y->line mappings
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex/map", id, readyJob), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var mapResp map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &mapResp)
+	require.NoError(t, err)
+	pages, ok := mapResp["pages"].(map[string]interface{})
+	require.True(t, ok)
+	p1, ok := pages["1"].([]interface{})
+	require.True(t, ok)
+	// should contain at least one mapping entry and the line numbers should be present
+	require.GreaterOrEqual(t, len(p1), 1)
+	first, ok := p1[0].(map[string]interface{})
+	require.True(t, ok)
+	_, hasLine := first["line"]
+	require.True(t, hasLine)
 }

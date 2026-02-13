@@ -90,6 +90,11 @@ func RegisterDocumentRoutes(r *gin.Engine) {
 	r.GET("/api/documents/:id/compile/jobs", ListCompileJobs)
 	r.GET("/api/documents/:id/compile/:jobId/download", DownloadCompiled)
 	r.GET("/api/documents/:id/compile/:jobId/synctex", DownloadSynctex)
+	// Best-effort SyncTeX mapping endpoint (Phase-03 prototype): returns a
+	// JSON mapping of page -> [{ y: 0..1, line: n }] computed from the
+	// document's line count (fallback when precise SyncTeX parsing is not
+	// available). Frontend uses this to map PDF clicks to source lines.
+	r.GET("/api/documents/:id/compile/:jobId/synctex/map", GetSyncTeXMap)
 	r.POST("/api/documents/:id/compile/cancel", CancelCompile)
 	r.GET("/api/documents/:id/preview", PreviewDocument)
 } 
@@ -379,6 +384,73 @@ func DownloadSynctex(c *gin.Context) {
 	}
 	c.Header("Content-Type", "application/gzip")
 	c.Data(http.StatusOK, "application/gzip", job.Synctex)
+}
+
+// GetSyncTeXMap returns a best-effort JSON mapping for the compiled job.
+// Prototype behavior: if exact SyncTeX parsing isn't available, we distribute
+// source lines evenly across page 1 so frontend can do reasonably accurate
+// clicks → line mapping. Response format:
+// { pages: { "1": [ { "y": 0.012, "line": 1 }, ... ] } }
+func GetSyncTeXMap(c *gin.Context) {
+	id := c.Param("id")
+	jobId := c.Param("jobId")
+
+	// verify job exists and is ready
+	compileJobsMu.RLock()
+	job, ok := compileJobs[jobId]
+	compileJobsMu.RUnlock()
+	if !ok || job.DocID != id {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	if job.Status != "ready" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job not ready"})
+		return
+	}
+
+	// locate document content (best-effort)
+	documentsMu.RLock()
+	d, dok := documentsStore[id]
+	documentsMu.RUnlock()
+	var totalLines int
+	if dok && d.Content != "" {
+		totalLines = len(splitLines(d.Content))
+	} else {
+		// fallback: assume 1 line to avoid division by zero
+		totalLines = 1
+	}
+
+	// build simple mapping for page 1 only (Phase-03 prototype)
+	entries := []map[string]interface{}{}
+	for i := 1; i <= totalLines; i++ {
+		// place mapping at the line's midpoint (0..1)
+		y := (float64(i)-0.5)/float64(totalLines)
+		if y < 0 { y = 0 }
+		if y > 1 { y = 1 }
+		entries = append(entries, map[string]interface{}{"y": y, "line": i})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"pages": map[string]interface{}{"1": entries}})
+}
+
+// splitLines is like strings.Split(..."\n") but treats trailing newline sensibly
+func splitLines(s string) []string {
+	// simple implementation avoiding extra imports
+	lines := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i+1
+		}
+	}
+	if start <= len(s)-1 {
+		lines = append(lines, s[start:])
+	}
+	if len(lines) == 0 {
+		return []string{""}
+	}
+	return lines
 }
 
 // minimalPDF returns a tiny PDF stub (used as a fallback when pdflatex isn't available).

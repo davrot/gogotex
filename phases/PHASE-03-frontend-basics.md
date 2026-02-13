@@ -18,6 +18,7 @@
 - [x] Protected-route + auto-refresh implemented (store + apiFetch)
 - [x] Editor E2E made resilient to CodeMirror runtime failures (localStorage fallback)
 - [x] CodeMirror dedupe override added to prevent multiple @codemirror/state instances
+- [x] SyncTeX prototype: backend `/synctex` (raw) + `/synctex/map` (best-effort JSON) and frontend mapping from PDF click → editor line (Phase‑03 prototype)
 - [ ] Final acceptance: 2 consecutive green auth-code E2E runs in CI (monitoring)
 
 
