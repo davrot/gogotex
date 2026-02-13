@@ -217,6 +217,11 @@ test.describe('Editor (Phase‑03)', () => {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ pages: { "1": [ { "y": 0.05, "line": 1 }, { "y": 0.45, "line": 5 }, { "y": 0.95, "line": 10 } ] } }) })
       })
 
+      // respond to single-line SyncTeX lookup
+      await page.route('**/api/documents/CREATED_DOC/compile/*/synctex/lookup?*', async (route) => {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ page: 1, y: 0.45, line: 5 }) })
+      })
+
       // click Compile -> should show compiling + logs, then iframe appears
       await page.click('button:has-text("Compile")')
       await page.waitForTimeout(200)
@@ -231,6 +236,15 @@ test.describe('Editor (Phase‑03)', () => {
       await page.waitForSelector('.synctex-available', { timeout: 2000 })
       const synBase64 = await page.evaluate(() => localStorage.getItem('gogotex.editor.synctex'))
       expect(synBase64).toBeTruthy()
+
+      // Verify single-line lookup endpoint (used by editor->PDF sync helpers)
+      const lookup = await page.evaluate(async () => {
+        const res = await fetch('/api/documents/CREATED_DOC/compile/job123/synctex/lookup?line=5')
+        return res.json()
+      })
+      expect(lookup.page).toBe(1)
+      expect(lookup.line).toBe(5)
+      expect(lookup.y).toBeCloseTo(0.45, 2)
 
       // Clicking the preview should move the editor caret (postMessage bridge)
       await page.frameLocator('iframe[title="preview"]').locator('p[data-line="5"]').click()

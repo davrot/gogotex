@@ -108,5 +108,15 @@ export const editorService = {
     }
     return res.json()
   },
+
+  async getCompileSynctexLookup(docId: string, jobId: string, line: number) {
+    if (!docId || !jobId || !line) throw new Error('docId, jobId and line required')
+    const res = await authService.apiFetch(`/api/documents/${docId}/compile/${jobId}/synctex/lookup?line=${line}`)
+    if (!res.ok) {
+      const t = await res.text()
+      throw new Error(`getCompileSynctexLookup failed: ${res.status} ${t}`)
+    }
+    return res.json()
+  },
 }
 

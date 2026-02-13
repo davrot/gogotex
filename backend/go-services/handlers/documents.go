@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -96,6 +98,8 @@ func RegisterDocumentRoutes(r *gin.Engine) {
 	r.GET("/api/documents/:id/compile/jobs", ListCompileJobs)
 	r.GET("/api/documents/:id/compile/:jobId/download", DownloadCompiled)
 	r.GET("/api/documents/:id/compile/:jobId/synctex", DownloadSynctex)
+	// Per-line lookup: returns { page, y, line } for a requested source line
+	r.GET("/api/documents/:id/compile/:jobId/synctex/lookup", GetSyncTeXLookup)
 	// Best-effort SyncTeX mapping endpoint (Phase-03 prototype): returns a
 	// JSON mapping of page -> [{ y: 0..1, line: n }] computed from the
 	// document's line count (fallback when precise SyncTeX parsing is not
@@ -513,6 +517,107 @@ func GetSyncTeXMap(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"pages": map[string]interface{}{"1": entries}})
+}
+
+// GetSyncTeXLookup returns a single best-effort mapping for a given source line.
+// Query param: ?line=<n>
+// Response: { page: int, y: 0..1, line: int }
+func GetSyncTeXLookup(c *gin.Context) {
+	id := c.Param("id")
+	jobId := c.Param("jobId")
+	lineStr := c.Query("line")
+	if lineStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "line query param required"})
+		return
+	}
+	ln, err := strconv.Atoi(lineStr)
+	if err != nil || ln <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid line"})
+		return
+	}
+
+	// verify job exists and is ready
+	compileJobsMu.RLock()
+	job, ok := compileJobs[jobId]
+	compileJobsMu.RUnlock()
+	if !ok || job.DocID != id {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	if job.Status != "ready" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job not ready"})
+		return
+	}
+
+	// prefer cached SynctexMap when available
+	if job.SynctexMap != nil {
+		for p, arr := range job.SynctexMap {
+			for _, e := range arr {
+				if e.Line == ln {
+					c.JSON(http.StatusOK, gin.H{"page": p, "y": e.Y, "line": e.Line})
+					return
+				}
+			}
+		}
+		// not found in map -> fall back to nearest match across all pages
+		bestP, bestY := 1, 0.5
+		found := false
+		for p, arr := range job.SynctexMap {
+			for _, e := range arr {
+				if !found || absFloat(e.Line-ln) < absFloat(bestYInt(bestP, bestY)-ln) {
+					bestP = p
+					bestY = e.Y
+					found = true
+				}
+			}
+		}
+		if found {
+			c.JSON(http.StatusOK, gin.H{"page": bestP, "y": bestY, "line": ln})
+			return
+		}
+	}
+
+	// attempt to use synctex CLI for a precise lookup when possible
+	if len(job.Synctex) > 0 && len(job.PDF) > 0 {
+		if path, err := exec.LookPath("synctex"); err == nil && path != "" {
+			tmpd, err := os.MkdirTemp("", "synctex-lookup-")
+			if err == nil {
+				defer os.RemoveAll(tmpd)
+				_ = os.WriteFile(filepath.Join(tmpd, "main.pdf"), job.PDF, 0644)
+				_ = os.WriteFile(filepath.Join(tmpd, "main.synctex.gz"), job.Synctex, 0644)
+
+				ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+				cmd := exec.CommandContext(ctx, "synctex", "view", "-i", fmt.Sprintf("%d:0:main.tex", ln), "-o", "main.pdf")
+				cmd.Dir = tmpd
+				out, _ := cmd.CombinedOutput()
+				cancel()
+				re := regexp.MustCompile(`Page[: ]+(\d+)`)
+				m := re.FindSubmatch(out)
+				if len(m) == 2 {
+					p, _ := strconv.Atoi(string(m[1]))
+					// CLI doesn't provide normalized y easily here; return midpoint
+					c.JSON(http.StatusOK, gin.H{"page": p, "y": 0.5, "line": ln})
+					return
+				}
+			}
+		}
+	}
+
+	// fallback proportional single-page mapping
+	documentsMu.RLock()
+	d, dok := documentsStore[id]
+	documentsMu.RUnlock()
+	var totalLines int
+	if dok && d.Content != "" {
+		totalLines = len(splitLines(d.Content))
+	} else {
+		totalLines = 1
+	}
+	if ln > totalLines { ln = totalLines }
+	y := (float64(ln)-0.5)/float64(totalLines)
+	if y < 0 { y = 0 }
+	if y > 1 { y = 1 }
+	c.JSON(http.StatusOK, gin.H{"page": 1, "y": y, "line": ln})
 }
 
 // splitLines is like strings.Split(..."\n") but treats trailing newline sensibly

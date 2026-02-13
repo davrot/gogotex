@@ -233,4 +233,39 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	p1b, ok := pages2["1"].([]interface{})
 	require.True(t, ok)
 	require.Equal(t, 2, len(p1b))
+
+	// Lookup endpoint should return a single mapping entry for a requested line
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex/lookup?line=1", id, readyJob), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var lookup map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &lookup)
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), lookup["page"])
+	assert.Equal(t, float64(1), lookup["line"])
+	assert.InDelta(t, 0.1, lookup["y"].(float64), 0.001)
+
+	// Fallback lookup: clear SynctexMap and use proportional mapping from document content
+	compileJobsMu.Lock()
+	if j, ok := compileJobs[jobID]; ok {
+		j.SynctexMap = nil
+	}
+	compileJobsMu.Unlock()
+	documentsMu.Lock()
+	if d2, ok := documentsStore[id]; ok {
+		d2.Content = strings.Repeat("x\n", 10)
+	}
+	documentsMu.Unlock()
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex/lookup?line=5", id, readyJob), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var lookup2 map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &lookup2)
+	require.NoError(t, err)
+	assert.Equal(t, float64(1), lookup2["page"])
+	expectedY := (5.0 - 0.5) / 10.0
+	assert.InDelta(t, expectedY, lookup2["y"].(float64), 0.01)
 }
