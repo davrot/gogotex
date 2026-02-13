@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
+	"github.com/redis/go-redis/v9"
 )
 
 // RedisRateLimitMiddleware provides a coarse fixed-window Redis-backed limiter.

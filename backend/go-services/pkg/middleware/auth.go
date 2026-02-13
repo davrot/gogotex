@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
-	)
+)
 
 // Token is minimal interface for a verified token that can expose claims
 type Token interface {

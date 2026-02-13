@@ -11,13 +11,13 @@ import (
 
 	mr "github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
-	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
 )
 
 // fakeToken implements Token
-type fakeToken struct{
+type fakeToken struct {
 	data map[string]interface{}
 }
 

@@ -15,6 +15,16 @@ jobs:
       - name: Set up Docker
         uses: docker/setup-buildx-action@v2
 
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+
+      - name: Run unit tests (backend/go-services)
+        run: |
+          cd backend/go-services
+          go test ./... -v
+
       - name: Run auth integration test
         env:
           CLEANUP: "true"

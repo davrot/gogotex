@@ -12,18 +12,26 @@ type fakeRepo struct {
 }
 
 func (f *fakeRepo) Create(ctx context.Context, s *Session) error {
-	if f.store == nil { f.store = map[string]*Session{} }
+	if f.store == nil {
+		f.store = map[string]*Session{}
+	}
 	f.store[s.RefreshToken] = s
 	return nil
 }
 func (f *fakeRepo) GetByRefresh(ctx context.Context, refresh string) (*Session, error) {
-	if f.store == nil { return nil, nil }
+	if f.store == nil {
+		return nil, nil
+	}
 	s, ok := f.store[refresh]
-	if !ok { return nil, nil }
+	if !ok {
+		return nil, nil
+	}
 	return s, nil
 }
 func (f *fakeRepo) DeleteByRefresh(ctx context.Context, refresh string) error {
-	if f.store == nil { return nil }
+	if f.store == nil {
+		return nil
+	}
 	delete(f.store, refresh)
 	return nil
 }
@@ -33,14 +41,26 @@ func TestCreateAndValidateSession(t *testing.T) {
 	svc := NewService(repo)
 	ctx := context.Background()
 	r, err := svc.CreateSession(ctx, "sub-1", time.Hour)
-	if err != nil { t.Fatalf("create failed: %v", err) }
-	if r == "" { t.Fatalf("expected refresh token") }
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	if r == "" {
+		t.Fatalf("expected refresh token")
+	}
 	// validate
 	sess, err := svc.ValidateRefresh(ctx, r)
-	if err != nil { t.Fatalf("validate error: %v", err) }
-	if sess == nil || sess.Sub != "sub-1" { t.Fatalf("unexpected session: %v", sess) }
+	if err != nil {
+		t.Fatalf("validate error: %v", err)
+	}
+	if sess == nil || sess.Sub != "sub-1" {
+		t.Fatalf("unexpected session: %v", sess)
+	}
 	// delete
-	if err := svc.DeleteRefresh(ctx, r); err != nil { t.Fatalf("delete failed: %v", err) }
+	if err := svc.DeleteRefresh(ctx, r); err != nil {
+		t.Fatalf("delete failed: %v", err)
+	}
 	sess2, _ := svc.ValidateRefresh(ctx, r)
-	if sess2 != nil { t.Fatalf("expected session removed") }
+	if sess2 != nil {
+		t.Fatalf("expected session removed")
+	}
 }

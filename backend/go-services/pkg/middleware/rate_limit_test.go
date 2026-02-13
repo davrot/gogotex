@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
-	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
 )
 
 func TestRateLimitMiddleware_AllowsUnderLimit(t *testing.T) {
@@ -32,7 +32,6 @@ func TestRateLimitMiddleware_AllowsUnderLimit(t *testing.T) {
 	// verify metrics incremented for memory limiter
 	require.Equal(t, 2.0, testutil.ToFloat64(metrics.RateLimitAllowed.WithLabelValues("memory")))
 }
-
 
 func TestRateLimitMiddleware_BlocksWhenExceeded(t *testing.T) {
 	r := gin.New()

@@ -68,6 +68,8 @@ done
 echo "Running Keycloak setup..."
 docker run --rm --network "$NET" -v "$ROOT_DIR":/workdir -w /workdir alpine:3.19 sh -c "apk add --no-cache curl jq openssl bash >/dev/null 2>&1 && KC_INSECURE=false KC_HOST=http://keycloak-keycloak:8080/sso /workdir/scripts/keycloak-setup.sh"
 
+# client-verification deferred until CLIENT_TOKEN is available (moved later in script)
+
 # Ensure TEST_USER default is set (avoids unbound variable when -u is set)
 TEST_USER=${TEST_USER:-testuser}
 
@@ -95,6 +97,41 @@ CLIENT_SECRET=$(cat "$CLIENT_SECRET_FILE")
 CLIENT_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "client_id=gogotex-backend" -d "client_secret=$CLIENT_SECRET" -d "grant_type=client_credentials" http://keycloak-keycloak:8080/sso/realms/gogotex/protocol/openid-connect/token | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p' || true)
 if [ -z "$CLIENT_TOKEN" ]; then
   echo "Failed to obtain client token"; exit 3
+fi
+
+# Verify client configuration (ensure directAccessGrantsEnabled and standardFlowEnabled)
+echo "Verifying Keycloak client configuration for 'gogotex-backend'..."
+# Prefer using an admin token for management operations (admin-cli). Fall back
+# to CLIENT_TOKEN for read-only checks if admin token cannot be obtained.
+ADMIN_PW=$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ROOT_DIR/gogotex-support-services/.env" | sed -E 's/^[^=]+=//')
+ADMIN_TOKEN=""
+if [ -n "$ADMIN_PW" ]; then
+  ADMIN_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "client_id=admin-cli" -d "username=admin" -d "password=$ADMIN_PW" -d "grant_type=password" http://keycloak-keycloak:8080/sso/realms/master/protocol/openid-connect/token | jq -r '.access_token // empty') || true
+fi
+# Use admin token when available, otherwise use client token for read-only checks.
+AUTH_HEADER="Authorization: Bearer ${ADMIN_TOKEN:-$CLIENT_TOKEN}"
+CLIENT_CONF=$(docker run --rm --network "$NET" curlimages/curl -sS -H "$AUTH_HEADER" "http://keycloak-keycloak:8080/sso/admin/realms/gogotex/clients?clientId=gogotex-backend" | jq 'if type=="array" then .[0] else . end') || true
+if [ -z "$CLIENT_CONF" ] || [ "$CLIENT_CONF" = "null" ]; then
+  echo "ERROR: could not fetch client configuration after setup"; exit 5
+fi
+DIRECT_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.directAccessGrantsEnabled')
+STANDARD_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.standardFlowEnabled')
+if [ "$DIRECT_ENABLED" != "true" ] || [ "$STANDARD_ENABLED" != "true" ]; then
+  echo "Client missing required grant settings; attempting to patch client..."
+  if [ -z "$ADMIN_TOKEN" ]; then
+    echo "Cannot patch client: admin token not available. Please ensure KEYCLOAK_ADMIN_PASSWORD is set in $ROOT_DIR/gogotex-support-services/.env"; exit 6
+  fi
+  CLIENT_ID_INTERNAL=$(echo "$CLIENT_CONF" | jq -r '.id')
+  UPDATED=$(echo "$CLIENT_CONF" | jq '.directAccessGrantsEnabled = true | .standardFlowEnabled = true')
+  docker run --rm --network "$NET" -v "$ROOT_DIR":/workdir -w /workdir curlimages/curl -sS -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" "http://keycloak-keycloak:8080/sso/admin/realms/gogotex/clients/$CLIENT_ID_INTERNAL" -d "$UPDATED" || true
+  echo "Patched client configuration. Re-fetching..."
+  CLIENT_CONF=$(docker run --rm --network "$NET" curlimages/curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "http://keycloak-keycloak:8080/sso/admin/realms/gogotex/clients?clientId=gogotex-backend" | jq 'if type=="array" then .[0] else . end') || true
+  DIRECT_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.directAccessGrantsEnabled')
+  STANDARD_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.standardFlowEnabled')
+  if [ "$DIRECT_ENABLED" != "true" ] || [ "$STANDARD_ENABLED" != "true" ]; then
+    echo "ERROR: client configuration still not patched correctly"; echo "$CLIENT_CONF" | sed -n '1,200p'; exit 6
+  fi
+  echo "Client configuration patched successfully"
 fi
 # Password-grant token for TEST_USER (used for /api/v1/me checks)
 
@@ -144,6 +181,7 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
       -e MONGODB_URI=mongodb://mongodb-mongodb:27017 \
       -e MONGODB_DATABASE=gogotex \
       -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
+      -e REDIS_HOST=redis-redis -e REDIS_PORT=6379 -e RATE_LIMIT_USE_REDIS=true \
       "$AUTH_IMAGE"; then
       echo "ERROR: failed to start auth container"; exit 5
     fi
@@ -156,7 +194,7 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
     echo "DEBUG: started auth container id=$CID"
     if [ -n "$CID" ]; then
       # wait up to 30s for the container to acquire an IP on the desired network
-      for _i in {1..30}; do
+      for _i in {1..60}; do
         # prefer the IP on the `tex-network` (if present)
         debug_ip=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{if eq $k "tex-network"}}{{$v.IPAddress}}{{end}}{{end}}' "$CID" 2>/dev/null || true)
         # fallback to any IP if `tex-network` key missing
@@ -193,17 +231,21 @@ else
   AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
 fi
 
-# Wait for auth service to be healthy (HTTP /health)
+# Wait for auth service to be fully ready (HTTP /ready) — this ensures handlers/deps are initialized
 for i in {1..60}; do
-  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/health || echo 000)
-  echo "Auth HTTP: $HTTP_CODE"
+  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/ready || echo 000)
+  echo "Auth ready HTTP: $HTTP_CODE"
   if [ "$HTTP_CODE" = "200" ]; then
-    echo 'Auth service listening'; break
+    echo 'Auth service ready'; break
+  fi
+  # Print short container logs for early debugging on first few iterations
+  if [ $i -le 3 ]; then
+    docker logs "$AUTH_CONTAINER_NAME" 2>/dev/null | sed -n '1,80p' || true
   fi
   sleep 1
 done
 if [ "$HTTP_CODE" != "200" ]; then
-  echo "Auth service did not become ready in time"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,200p'; exit 6
+  echo "Auth service did not become ready in time"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,400p'; exit 6
 fi
 
 # --- Rate-limit + metrics verification (global middleware) ---

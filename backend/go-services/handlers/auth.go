@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
+	"github.com/gogotex/gogotex/backend/go-services/pkg/logger"
 	"os"
 	"strings"
 	"time"
@@ -19,7 +19,7 @@ import (
 	"github.com/gogotex/gogotex/backend/go-services/internal/sessions"
 	"github.com/gogotex/gogotex/backend/go-services/internal/tokens"
 	"github.com/gogotex/gogotex/backend/go-services/internal/users"
-}
+)
 
 // LoginRequest used for password-mode login (dev/testing)
 type LoginRequest struct {
@@ -85,7 +85,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		tokenResp, err = requestAuthCodeToken(c.Request.Context(), host, realm, h.cfg.Keycloak.ClientID, h.cfg.Keycloak.ClientSecret, req.Code, req.RedirectURI)
 		if err != nil {
 			// log token exchange error with redirect URI for easier debugging in CI/integration runs
-			log.Printf("auth-code token exchange error (redirect_uri=%q): %v", req.RedirectURI, err)
+			logger.Errorf("auth-code token exchange error (redirect_uri=%q): %v", req.RedirectURI, err)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "authentication failed", "details": err.Error(), "redirect_uri_used": req.RedirectURI})
 			return
 		}
@@ -98,19 +98,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 	u, err := h.usersSvc.UpsertFromClaims(c.Request.Context(), claims)
 	if err != nil {
-		log.Printf("user upsert error: %v", err)
+		logger.Errorf("user upsert error: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "user upsert failed", "details": err.Error()})
 		return
 	}
 	if u == nil {
-		log.Printf("user upsert returned nil user (claims missing 'sub')")
+		logger.Errorf("user upsert returned nil user (claims missing 'sub')")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "user upsert failed", "details": "no user returned from upsert"})
 		return
 	}
 	// create refresh session
 	rft, err := h.sessionsSvc.CreateSession(c.Request.Context(), u.Sub, 7*24*time.Hour)
 	if err != nil {
-		log.Printf("failed to create session: %v", err)
+		logger.Errorf("failed to create session: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session", "details": err.Error()})
 		return
 	}

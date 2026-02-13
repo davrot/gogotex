@@ -16,4 +16,4 @@ fi
 docker run --rm -v "$ROOT_DIR":"$ROOT_DIR" -w "$ROOT_DIR" -v /var/run/docker.sock:/var/run/docker.sock --network tex-network \
   -e RUN_INTEGRATION_DOCKER=true -e INTEGRATION_IN_DOCKER=1 \
   gogotex/integration-runner:latest \
-  bash -lc "set -euo pipefail; cd '$ROOT_DIR'; bash ./scripts/ci/auth-integration-test.sh $*"
+  -lc "set -euo pipefail; cd '$ROOT_DIR'; bash ./scripts/ci/auth-integration-test.sh $*"

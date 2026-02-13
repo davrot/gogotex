@@ -10,8 +10,7 @@ services:
     volumes:
       - ./data-grafana:/var/lib/grafana
       - ./config-prometheus:/etc/grafana/provisioning:ro
-    ports:
-      - "3001:3000"
+
     networks:
       - tex-network
 
