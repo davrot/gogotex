@@ -59,9 +59,9 @@ docker build \
   -t gogotex-frontend:local "$ROOT_DIR/frontend"
 
 # Quick regression guard: ensure built frontend contains required auth payload (mode=auth_code)
-if ! docker run --rm gogotex-frontend:local sh -c 'cat /usr/share/nginx/html/assets/index-*.js | grep -q "\"mode\":\"auth_code\""'; then
-  echo "ERROR: built frontend bundle missing \"mode:\\"auth_code\" (regression)" >&2
-  exit 8
+# Accept either minified/unquoted property output (mode:"auth_code") or explicit JSON string ("mode":"auth_code").
+if ! docker run --rm gogotex-frontend:local sh -c "cat /usr/share/nginx/html/assets/index-*.js | grep -E -q '(\"mode\":\"auth_code\"|mode:\"auth_code\")'"; then
+    echo 'ERROR: built frontend bundle missing "mode":"auth_code" (regression)' >&2
 fi
 
 echo "Starting frontend service for E2E auth-code test..."

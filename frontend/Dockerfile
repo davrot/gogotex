@@ -13,7 +13,7 @@ ARG VITE_REDIRECT_URI
 RUN printf "VITE_KEYCLOAK_URL=%s\nVITE_KEYCLOAK_REALM=%s\nVITE_KEYCLOAK_CLIENT_ID=%s\nVITE_AUTH_URL=%s\nVITE_REDIRECT_URI=%s\n" "${VITE_KEYCLOAK_URL:-}" "${VITE_KEYCLOAK_REALM:-}" "${VITE_KEYCLOAK_CLIENT_ID:-}" "${VITE_AUTH_URL:-}" "${VITE_REDIRECT_URI:-}" > .env
 
 COPY package.json package-lock.json* ./
-RUN npm ci --no-audit --no-fund || true
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 

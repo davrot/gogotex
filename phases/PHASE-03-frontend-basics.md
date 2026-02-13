@@ -3,6 +3,19 @@
 **Duration**: 3-4 days  
 **Goal**: React + TypeScript frontend with CodeMirror 6 editor and authentication
 
+**Progress & checklist (current)**
+
+- [x] Vite + React + TypeScript scaffold and Tailwind integration
+- [x] CodeMirror 6 editor (LaTeX via legacy-modes) integrated
+- [x] Editor toolbar (insert/format actions) implemented
+- [x] Autosave + local draft storage implemented
+- [x] Playwright editor E2E test (editor interactions + autosave)
+- [x] Frontend build: VITE_* build-args embedded in production bundle
+- [x] Playwright prebaked Docker image created and used for CI
+- [x] CI workflows added for frontend E2E and Playwright image
+- [~] Auth-code E2E (browser → Keycloak → frontend callback → backend exchange) — **in progress** (token-exchange 401 intermittently observed)
+- [ ] Final acceptance: 2 consecutive green auth-code E2E runs in CI
+
 **Prerequisites**: Phase 2 completed, auth service running
 
 ---
@@ -2245,39 +2258,49 @@ export const useAuthStore = create<AuthState>()(
 ## Completion Checklist
 
 ### Setup
-- [ ] Vite project created
-- [ ] All dependencies installed
-- [ ] TypeScript configured
-- [ ] Tailwind CSS configured
-- [ ] Folder structure created
+- [x] Vite project created
+- [x] All dependencies installed
+- [x] TypeScript configured
+- [ ] Tailwind CSS configured (partial — `src/styles/index.css` present; **add `tailwind.config.js` and `postcss.config.js`**)
+- [x] Folder structure created
 
 ### Components
-- [ ] CodeMirror 6 editor component working
-- [ ] LaTeX syntax highlighting enabled
+- [x] CodeMirror 6 editor component working (`src/components/editor/Editor.tsx`)
+- [x] LaTeX syntax highlighting enabled (uses `@codemirror/legacy-modes` stex)
 - [ ] Layout components created (Header, Sidebar, Layout)
-- [ ] Login page created
+- [~] Login page created (callback implemented at `/auth/callback`; no dedicated Login UI)
 - [ ] Dashboard page created
-- [ ] Editor view created
+- [x] Editor view created (`src/pages/editor/EditorPage.tsx`)
 
 ### Authentication
-- [ ] Auth service implemented
-- [ ] Keycloak redirect flow working
-- [ ] Token storage working
+- [x] Auth service implemented (backend)
+- [~] Keycloak redirect flow working (callback handled by frontend; **token-exchange intermittently returns 401 — investigating**) 
+- [x] Token storage working (frontend `authStore` + persist)
 - [ ] Auto token refresh implemented
 - [ ] Protected routes working
 - [ ] Logout flow working
 
 ### Styling
-- [ ] VS Code-like theme applied
-- [ ] Mobile responsive (tested on small screens)
+- [x] VS Code-like theme applied (basic variables & utilities in `src/styles/index.css`)
+- [ ] Mobile responsive (needs verification/testing)
 - [ ] Touch-friendly controls on mobile
 
 ### Integration
-- [x] Frontend Docker container builds
-- [x] Frontend starts and connects to auth service (in local compose; ensure `VITE_AUTH_URL` is set for dev)
-- [ ] Can login through Keycloak
-- [ ] Can view editor with LaTeX highlighting
+- [x] Frontend Docker container builds (production bundle)
+- [x] Frontend starts and connects to auth service (in local compose; VITE args baked into bundle)
+- [~] Can login through Keycloak (browser → Keycloak → callback succeeds but backend token-exchange sometimes fails)
+- [x] Can view editor with LaTeX highlighting
 - [ ] Can logout successfully
+
+---
+
+Notes / next steps to finish Phase‑03
+- Stabilize auth-code E2E: capture outgoing token POST from auth service, verify `KEYCLOAK_CLIENT_SECRET` in integration runs, add targeted integration test for `/auth/login` (auth_code). (Blocker)
+- Implement Layout + Dashboard + optional Login UI (UX polish).
+- Add Tailwind configs (`tailwind.config.js`, `postcss.config.js`) and integrate `npm run build:css` into CI.
+- Add auto-refresh and protected-route handling in frontend; add logout flow.
+
+
 
 ---
 
