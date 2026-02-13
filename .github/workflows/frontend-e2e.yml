@@ -31,6 +31,11 @@ jobs:
           npm ci --no-audit --no-fund
           npx playwright install --with-deps
 
+      - name: Prepare TeX worker (pull image + start service)
+        run: |
+          docker pull blang/latex:ubuntu
+          docker compose -f gogotex-support-services/compose.yaml up -d texlive
+
       - name: Run auth integration script (includes Playwright)
         env:
           CLEANUP: "true"
@@ -38,6 +43,8 @@ jobs:
           PLAYWRIGHT_LOCAL_IMAGE: "ghcr.io/${{ github.repository_owner }}/gogotex-playwright:ci"
           KEYCLOAK_DEBUG: "false"
           FAIL_ON_AUTH_CODE: "true"
+          DOCKER_TEX_IMAGE: "blang/latex:ubuntu"
+          START_TEXLIVE: "true"
         run: |
           chmod +x ./scripts/ci/auth-integration-test.sh
           ./scripts/ci/auth-integration-test.sh

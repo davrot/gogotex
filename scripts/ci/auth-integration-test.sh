@@ -42,7 +42,13 @@ if [ -z "$NET" ]; then
   exit 2
 fi
 echo "Using Docker network: $NET"
-
+# Optionally start a TeX worker service for real pdflatex when START_TEXLIVE=true
+if [ "${START_TEXLIVE:-false}" = "true" ]; then
+  echo "START_TEXLIVE=true -> starting texlive service using gogotex-support-services/compose.yaml" >&2
+  docker compose -f "$ROOT_DIR/gogotex-support-services/compose.yaml" up -d texlive || true
+  # ensure the configured Docker TeX image is present for backend docker-run fallback
+  docker pull "${DOCKER_TEX_IMAGE:-blang/latex:ubuntu}" || true
+fi
 # Provision Keycloak (migrated to sub-script for maintainability)
 echo "Running Keycloak setup..."
 "$ROOT_DIR/scripts/ci/auth-integration-test/keycloak-provision.sh" "$NET" || { echo "Keycloak provisioning failed"; exit 2; }

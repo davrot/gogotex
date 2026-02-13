@@ -39,6 +39,16 @@ RUN_INTEGRATION=true docker compose -f docker-compose.ci.yml up --build --abort-
 CLEANUP=true ./scripts/ci/auth-integration-test.sh
 ```
 
+To run integration tests with a real TeX toolchain (pdflatex) enable the TeX worker. You can either start the optional `texlive` compose service or set the Docker image used by the backend fallback:
+
+```bash
+# start texlive service on the internal network
+START_TEXLIVE=true CLEANUP=true ./scripts/ci/auth-integration-test.sh
+
+# or use docker-run fallback by setting the image (used automatically when pdflatex isn't available)
+DOCKER_TEX_IMAGE=blang/latex:ubuntu ./scripts/ci/auth-integration-test.sh
+```
+
 - Use `.env` or `gogotex-support-services/.env` to provide required service credentials for Keycloak/Redis/MinIO when running the health-check.
 - For reproducible CI runs, `docker-compose.ci.yml` mounts the repository and runs `scripts/ci/run-local.sh` inside a clean `golang:1.20` container.
 

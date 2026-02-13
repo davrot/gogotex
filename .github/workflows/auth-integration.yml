@@ -25,10 +25,17 @@ jobs:
           cd backend/go-services
           go test ./... -v
 
+      - name: Prepare TeX worker (pull image + start service)
+        run: |
+          docker pull blang/latex:ubuntu
+          docker compose -f gogotex-support-services/compose.yaml up -d texlive
+
       - name: Run auth integration test
         env:
           CLEANUP: "true"
           ALLOW_INSECURE_TOKEN: "true"
+          DOCKER_TEX_IMAGE: "blang/latex:ubuntu"
+          START_TEXLIVE: "true"
         run: |
           chmod +x ./scripts/ci/auth-integration-test.sh
           ./scripts/ci/auth-integration-test.sh
