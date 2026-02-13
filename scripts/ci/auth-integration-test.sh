@@ -360,6 +360,57 @@ awk "BEGIN{exit !($ALLOWED_VAL >= 1)}" || (echo "Allowed metric < 1" && exit 8)
 
 echo "Rate-limiter + metrics verified (allowed >= 1)."
 
+# Optional compile smoke test: exercised when START_TEXLIVE=true or DOCKER_TEX_IMAGE is set
+if [ "${START_TEXLIVE:-false}" = "true" ] || [ -n "${DOCKER_TEX_IMAGE:-}" ]; then
+  echo "START_TEXLIVE/DOCKER_TEX_IMAGE set -> running compile smoke test against $AUTH_HOST"
+  SMOKE_DOC_BODY='{"name":"smoke.tex","content":"\\documentclass{article}\\begin{document}Smoke Test\\end{document}"}'
+  DOC_ID=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d "$SMOKE_DOC_BODY" http://$AUTH_HOST/api/documents | sed -n 's/.*"id":"\([^\"]*\)".*/\1/p') || true
+  if [ -z "$DOC_ID" ]; then
+    echo "ERROR: failed to create smoke document" >&2
+    docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_HOST/ || true
+    exit 9
+  fi
+  echo "Created smoke document: $DOC_ID"
+
+  CJOB=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST http://$AUTH_HOST/api/documents/$DOC_ID/compile | sed -n 's/.*"jobId":"\([^\"]*\)".*/\1/p') || true
+  if [ -z "$CJOB" ]; then
+    echo "ERROR: failed to start compile job for $DOC_ID" >&2
+    exit 10
+  fi
+  echo "Started compile job: $CJOB"
+
+  # poll logs until ready (timeout 40s)
+  STATUS=""
+  for i in $(seq 1 40); do
+    STATUS=$(docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_HOST/api/documents/$DOC_ID/compile/logs | sed -n 's/.*"status":"\([^\"]*\)".*/\1/p' || true)
+    if [ "$STATUS" = "ready" ]; then
+      break
+    fi
+    sleep 1
+  done
+  if [ "$STATUS" != "ready" ]; then
+    echo "ERROR: compile job did not reach ready state (status=$STATUS)" >&2
+    docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_HOST/api/documents/$DOC_ID/compile/logs || true
+    exit 11
+  fi
+  echo "Compile job ready"
+
+  # verify PDF download is a real PDF (starts with %PDF)
+  if ! docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_HOST/api/documents/$DOC_ID/compile/$CJOB/download | head -c 4 | grep -q '%PDF'; then
+    echo "ERROR: compiled artifact is not a PDF" >&2
+    exit 12
+  fi
+  echo "PDF artifact looks valid"
+
+  # verify synctex endpoint serves gzip content-type
+  CT=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{content_type}" http://$AUTH_HOST/api/documents/$DOC_ID/compile/$CJOB/synctex || true)
+  if [ "$CT" != "application/gzip" ] && [ "$CT" != "application/x-gzip" ]; then
+    echo "ERROR: synctex endpoint did not return gzip (content-type=$CT)" >&2
+    exit 13
+  fi
+  echo "Synctex endpoint returned gzip"
+fi
+
 # --- Start auth-code E2E flow: perform headless login to capture code or fallback to callback sink ---
 # perform headless login using a small Python script (runs in-network)
 TEST_PASS_FILE="$ROOT_DIR/gogotex-support-services/keycloak-service/testuser_password.txt"
