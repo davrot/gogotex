@@ -118,6 +118,13 @@ test.describe('Editor (Phase‑03)', () => {
       const sItalic = await page.evaluate(() => localStorage.getItem('gogotex.editor.content'))
       expect(sItalic).toContain('\\textit')
 
+      // auto-pairing: typing '(' should insert matching ')'
+      await page.click(editorSelector)
+      await page.keyboard.type('(')
+      await page.waitForTimeout(100)
+      const parenContent = await page.evaluate(() => localStorage.getItem('gogotex.editor.content'))
+      expect(parenContent).toContain('()')
+
       // After creating a document, Save-to-server should PATCH the created id
       let sawPatch = false
       page.on('request', (req) => {
