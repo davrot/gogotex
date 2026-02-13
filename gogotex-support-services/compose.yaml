@@ -123,6 +123,14 @@ services:
         condition: service_healthy
 
 #########
+# Frontend
+#########
+  frontend:
+    extends:
+      file: ./frontend-service/frontend.yaml
+      service: frontend
+
+#########
 # nginx #
 #########
   nginx-nginx:

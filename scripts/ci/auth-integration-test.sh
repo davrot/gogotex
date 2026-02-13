@@ -21,52 +21,53 @@ fi
 # dedicated integration runner image use `make integration-runner-image` and then
 # `scripts/ci/run-integration-in-docker.sh`.
 
-KC_POSTGRES_YAML="$ROOT_DIR/gogotex-support-services/keycloak-service/keycloak-postgres.yaml"
-KC_KEYCLOAK_YAML="$ROOT_DIR/gogotex-support-services/keycloak-service/keycloak.yaml"
-MONGO_YAML="$ROOT_DIR/gogotex-support-services/mongodb-service/mongodb.yaml"
-
-# Bring up Keycloak and MongoDB (robust: only bring up missing services)
-KC_PRESENT=$(docker ps --format '{{.Names}}' | grep -q '^keycloak-keycloak$' && echo yes || echo no)
-MONGO_PRESENT=$(docker ps --format '{{.Names}}' | grep -q '^mongodb-mongodb$' && echo yes || echo no)
-if [ "$KC_PRESENT" = "yes" ] && [ "$MONGO_PRESENT" = "yes" ]; then
-  echo "Keycloak and MongoDB containers already present; skipping docker compose up"
-else
-  echo "Bringing up missing infra services..."
-  if [ "$KC_PRESENT" = "no" ] && [ "$MONGO_PRESENT" = "no" ]; then
-    docker compose -f "$KC_POSTGRES_YAML" -f "$KC_KEYCLOAK_YAML" -f "$MONGO_YAML" up -d || true
-  elif [ "$KC_PRESENT" = "no" ] && [ "$MONGO_PRESENT" = "yes" ]; then
-    docker compose -f "$KC_POSTGRES_YAML" -f "$KC_KEYCLOAK_YAML" up -d || true
-  else
-    echo "No infra changes required"
-  fi
-fi
-
-# Wait for keycloak container
-for i in {1..60}; do
-  if docker ps --format '{{.Names}}' | grep -q '^keycloak-keycloak$'; then
-    echo "Keycloak container present"; break
-  fi
-  sleep 1
-done
-
-NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' keycloak-keycloak)
+# Start infra (Keycloak + MongoDB) and wait until Keycloak HTTP is reachable.
+# This logic has been extracted to a focused helper script that returns the Docker
+# network name so downstream steps can reuse it.
+NET="$("$ROOT_DIR/scripts/ci/auth-integration-test/infra.sh")"
 if [ -z "$NET" ]; then
-  echo "ERROR: could not detect Docker network for keycloak-keycloak" >&2
+  echo "ERROR: infra script failed to return Docker network" >&2
   exit 2
 fi
+echo "Using Docker network: $NET"
 
-echo "Waiting for Keycloak HTTP to respond..."
-for i in {1..120}; do
-  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://keycloak-keycloak:8080/sso/ || echo 000)
-  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "400" ]; then
-    echo "Keycloak HTTP response: $HTTP_CODE"; break
-  fi
-  echo -n '.'; sleep 2
-done
-
-# Run keycloak setup script inside network
+# Provision Keycloak (migrated to sub-script for maintainability)
 echo "Running Keycloak setup..."
-docker run --rm --network "$NET" -v "$ROOT_DIR":/workdir -w /workdir alpine:3.19 sh -c "apk add --no-cache curl jq openssl bash >/dev/null 2>&1 && KC_INSECURE=false KC_HOST=http://keycloak-keycloak:8080/sso /workdir/scripts/keycloak-setup.sh"
+"$ROOT_DIR/scripts/ci/auth-integration-test/keycloak-provision.sh" "$NET" || { echo "Keycloak provisioning failed"; exit 2; }
+
+# Build and start frontend so we can exercise the real frontend callback path
+# Rebuild frontend with network-aware VITE_* values so the browser can reach Keycloak and auth service
+echo "Building frontend image with in-network VITE settings..."
+docker build \
+  --build-arg VITE_KEYCLOAK_URL=http://keycloak-keycloak:8080 \
+  --build-arg VITE_AUTH_URL=http://gogotex-auth-integration:8081 \
+  --build-arg VITE_REDIRECT_URI=http://frontend/auth/callback \
+  -t gogotex-frontend:local "$ROOT_DIR/frontend"
+
+echo "Starting frontend service for E2E auth-code test..."
+bash "$ROOT_DIR/gogotex-support-services/up_frontend.sh" || true
+
+# Run Playwright E2E (browser flow) if Playwright is available in CI
+# This step has its own script for better maintainability and a shell-level timeout
+if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
+  echo "Running Playwright E2E test (browser -> Keycloak -> frontend -> auth)..."
+
+  # avoid unbound-variable under set -u; ensure password file is read if present
+  TEST_USER=${TEST_USER:-testuser}
+  TEST_PASS=${TEST_PASS:-$(cat "$ROOT_DIR/gogotex-support-services/keycloak-service/testuser_password.txt" 2>/dev/null || echo "Test123!")}
+
+  # Playwright run timeout (seconds) — shell-level guard to prevent hangs
+  PLAYWRIGHT_RUN_TIMEOUT=${PLAYWRIGHT_RUN_TIMEOUT:-120}
+
+  if ! timeout ${PLAYWRIGHT_RUN_TIMEOUT}s "$ROOT_DIR/scripts/ci/auth-integration-test/playwright.sh"; then
+    echo "Playwright step timed out or failed (timeout=${PLAYWRIGHT_RUN_TIMEOUT}s)"; docker logs keycloak-keycloak 2>/dev/null | sed -n '1,200p' || true
+    if [ "${FAIL_ON_AUTH_CODE:-true}" = "true" ]; then
+      exit 7
+    else
+      echo "WARN: Playwright timed out/failed but continuing (FAIL_ON_AUTH_CODE=false)"
+    fi
+  fi
+fi
 
 # client-verification deferred until CLIENT_TOKEN is available (moved later in script)
 
