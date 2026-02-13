@@ -1,0 +1,24 @@
+services:
+  gogotex-go-document:
+    build:
+      context: ../../
+      dockerfile: backend/go-services/Dockerfile.document
+    image: gogotex-go-document:local
+    container_name: gogotex-go-document
+    hostname: gogotex-go-document
+    restart: unless-stopped
+
+    environment:
+      - DOC_SERVICE_PORT=5010
+      - MONGODB_URI=mongodb://mongodb-mongodb:27017
+      - MONGODB_DATABASE=gogotex
+
+    ports:
+      - "5010:5010"
+
+    networks:
+      - tex-network
+
+networks:
+  tex-network:
+    external: true

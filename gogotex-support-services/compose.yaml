@@ -122,6 +122,15 @@ services:
       keycloak-keycloak:
         condition: service_healthy
 
+  # External go-document service (Phase‑05) — optional runtime service for persistent documents
+  gogotex-go-document:
+    extends:
+      file: ./document-service/document.yaml
+      service: gogotex-go-document
+    depends_on:
+      mongodb-mongodb:
+        condition: service_healthy
+
 #########
 # Frontend
 #########
@@ -129,6 +138,15 @@ services:
     extends:
       file: ./frontend-service/frontend.yaml
       service: frontend
+
+  # Optional TeX worker for real pdflatex compilation in CI/dev. Image defaults to public `blang/latex:ubuntu`.
+  texlive:
+    image: ${TEX_IMAGE:-blang/latex:ubuntu}
+    entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+    # not required by default; start when you need a local TeX worker
+    deploy:
+      restart_policy:
+        condition: none
 
 #########
 # nginx #

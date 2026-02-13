@@ -59,6 +59,16 @@ DOC_SERVICE_INLINE=true ./scripts/dev/up-auth-doc-inline.sh
 DOC_SERVICE_INLINE=true START_TEXLIVE=true CLEANUP=true ./scripts/ci/auth-integration-test.sh
 ```
 
+To run the external `go-document` service (preferred for Phase‑05 and CI), start the dedicated compose service:
+
+```bash
+# start external go-document service and TeX worker
+docker compose -f gogotex-support-services/compose.yaml up -d gogotex-go-document texlive
+
+# run integration with external go-document
+START_TEXLIVE=true CLEANUP=true ./scripts/ci/auth-integration-test.sh
+```
+
 - Use `.env` or `gogotex-support-services/.env` to provide required service credentials for Keycloak/Redis/MinIO when running the health-check.
 - For reproducible CI runs, `docker-compose.ci.yml` mounts the repository and runs `scripts/ci/run-local.sh` inside a clean `golang:1.20` container.
 
