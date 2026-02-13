@@ -17,7 +17,21 @@ MINIO_HOST=${MINIO_HOST:-minio-minio:9000}
 MINIO_ALIAS=${MINIO_ALIAS:-myminio}
 MINIO_USER=${MINIO_ROOT_USER:-admin}
 MINIO_PASS=${MINIO_ROOT_PASSWORD:-changeme_minio}
-BUCKETS=(projects templates backups plugins)
+# Primary application bucket can be supplied via MINIO_BUCKET (defaults to 'gogotex')
+MINIO_BUCKET=${MINIO_BUCKET:-gogotex}
+
+# Default helpful buckets; include configured MINIO_BUCKET if not already present
+DEFAULT_BUCKETS=(projects templates backups plugins)
+BUCKETS=(${DEFAULT_BUCKETS[@]})
+for _b in "${BUCKETS[@]}"; do
+  if [ "$_b" = "$MINIO_BUCKET" ]; then
+    HAS_BUCKET=1
+    break
+  fi
+done
+if [ -z "${HAS_BUCKET:-}" ]; then
+  BUCKETS+=("$MINIO_BUCKET")
+fi
 
 # Ensure mc is available via Docker image
 MC_IMAGE=${MC_IMAGE:-minio/mc:latest}

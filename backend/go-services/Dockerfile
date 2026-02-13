@@ -11,5 +11,7 @@ RUN go build -o /gogotex-auth ./
 # Final minimal image
 FROM scratch
 COPY --from=builder /gogotex-auth /gogotex-auth
+# default runtime log level (can be overridden with LOG_LEVEL env)
+ENV LOG_LEVEL=info
 EXPOSE 8081
 ENTRYPOINT ["/gogotex-auth"]

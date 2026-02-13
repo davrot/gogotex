@@ -28,14 +28,6 @@ services:
 
     command: start-dev
 
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.keycloak.rule=Host(`keycloak.local`)"
-      - "traefik.http.routers.keycloak.entrypoints=web"
-      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
-    # expose Keycloak HTTP to localhost for easier host-side debugging (mapped to 11080)
-    ports:
-      - "127.0.0.1:11080:8080"
     networks:
       - tex-network
 

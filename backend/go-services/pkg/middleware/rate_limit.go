@@ -5,8 +5,8 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"golang.org/x/time/rate"
 	"github.com/gogotex/gogotex/backend/go-services/pkg/metrics"
+	"golang.org/x/time/rate"
 )
 
 // per-key limiter store (simple in-memory token-bucket)

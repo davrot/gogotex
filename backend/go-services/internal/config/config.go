@@ -1,9 +1,9 @@
 package config
 
 import (
-	"log"
 	"os"
 	"time"
+	"github.com/gogotex/gogotex/backend/go-services/pkg/logger"
 
 	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
@@ -88,10 +88,10 @@ func LoadConfig() (*Config, error) {
 
 	cfg := &Config{
 		Server: ServerConfig{
-			Port:        viper.GetString("SERVER_PORT"),
-			Host:        viper.GetString("SERVER_HOST"),
-			Environment: viper.GetString("SERVER_ENVIRONMENT"),
-			ReadTimeout: 30 * time.Second,
+			Port:         viper.GetString("SERVER_PORT"),
+			Host:         viper.GetString("SERVER_HOST"),
+			Environment:  viper.GetString("SERVER_ENVIRONMENT"),
+			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 		},
 		MongoDB: MongoDBConfig{
@@ -127,7 +127,7 @@ func LoadConfig() (*Config, error) {
 
 	// Basic validation
 	if cfg.JWT.Secret == "" {
-		log.Println("WARNING: JWT_SECRET is not set; set a secure value in production")
+		logger.Warn("JWT_SECRET is not set; set a secure value in production")
 	}
 
 	return cfg, nil
@@ -136,7 +136,7 @@ func LoadConfig() (*Config, error) {
 func getEnvOrPanic(key string) string {
 	v := os.Getenv(key)
 	if v == "" {
-		log.Fatalf("environment variable %s is required", key)
+		logger.Fatalf("environment variable %s is required", key)
 	}
 	return v
 }

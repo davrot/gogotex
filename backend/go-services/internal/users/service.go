@@ -24,10 +24,10 @@ func (s *Service) UpsertFromClaims(ctx context.Context, claims map[string]interf
 		return nil, nil
 	}
 	u := &models.User{
-		Sub:   sub,
+		Sub:    sub,
 		OIDCId: sub,
-		Email: email,
-		Name:  name,
+		Email:  email,
+		Name:   name,
 	}
 	return s.repo.UpsertBySub(ctx, u)
 }

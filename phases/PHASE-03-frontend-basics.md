@@ -2208,8 +2208,8 @@ export const useAuthStore = create<AuthState>()(
 - [ ] Touch-friendly controls on mobile
 
 ### Integration
-- [ ] Frontend Docker container builds
-- [ ] Frontend starts and connects to auth service
+- [x] Frontend Docker container builds
+- [x] Frontend starts and connects to auth service (in local compose; ensure `VITE_AUTH_URL` is set for dev)
 - [ ] Can login through Keycloak
 - [ ] Can view editor with LaTeX highlighting
 - [ ] Can logout successfully

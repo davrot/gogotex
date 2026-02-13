@@ -7,6 +7,7 @@ import (
 
 	"github.com/gogotex/gogotex/backend/go-services/internal/models"
 )
+
 type fakeRepo struct {
 	lastUpsert *models.User
 	upsertErr  error

@@ -9,73 +9,74 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-KC_POSTGRES_YAML="$ROOT_DIR/gogotex-support-services/keycloak-service/keycloak-postgres.yaml"
-KC_KEYCLOAK_YAML="$ROOT_DIR/gogotex-support-services/keycloak-service/keycloak.yaml"
-MONGO_YAML="$ROOT_DIR/gogotex-support-services/mongodb-service/mongodb.yaml"
-
-# Bring up Keycloak and MongoDB (robust: only bring up missing services)
-KC_PRESENT=$(docker ps --format '{{.Names}}' | grep -q '^keycloak-keycloak$' && echo yes || echo no)
-MONGO_PRESENT=$(docker ps --format '{{.Names}}' | grep -q '^mongodb-mongodb$' && echo yes || echo no)
-if [ "$KC_PRESENT" = "yes" ] && [ "$MONGO_PRESENT" = "yes" ]; then
-  echo "Keycloak and MongoDB containers already present; skipping docker compose up"
-else
-  echo "Bringing up missing infra services..."
-  if [ "$KC_PRESENT" = "no" ] && [ "$MONGO_PRESENT" = "no" ]; then
-    docker compose -f "$KC_POSTGRES_YAML" -f "$KC_KEYCLOAK_YAML" -f "$MONGO_YAML" up -d || true
-  elif [ "$KC_PRESENT" = "no" ] && [ "$MONGO_PRESENT" = "yes" ]; then
-    docker compose -f "$KC_POSTGRES_YAML" -f "$KC_KEYCLOAK_YAML" up -d || true
-  else
-    echo "No infra changes required"
-  fi
+# Optional: run inside an Ubuntu runner container when explicitly requested.
+# Set RUN_INTEGRATION_DOCKER=true to re-exec into the integration-runner container.
+if [ "${RUN_INTEGRATION_DOCKER:-""}" = "true" ] && [ "${INTEGRATION_IN_DOCKER:-""}" != "1" ]; then
+  echo "Re-running auth integration inside ephemeral Ubuntu container on network 'tex-network'..."
+  docker run --rm -v "$ROOT_DIR":"$ROOT_DIR" -w "$ROOT_DIR" -v /var/run/docker.sock:/var/run/docker.sock --network tex-network ubuntu:24.04 \
+    bash -lc "set -euo pipefail; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq >/dev/null; apt-get install -y -qq docker.io curl jq bash >/dev/null; INTEGRATION_IN_DOCKER=1 bash '$SCRIPT_DIR/ci/auth-integration-test.sh' \"$@\""
+  exit $?
 fi
+# By default the script runs on the host (do not auto re-exec). To run inside the
+# dedicated integration runner image use `make integration-runner-image` and then
+# `scripts/ci/run-integration-in-docker.sh`.
 
-# Wait for keycloak container
-for i in {1..60}; do
-  if docker ps --format '{{.Names}}' | grep -q '^keycloak-keycloak$'; then
-    echo "Keycloak container present"; break
-  fi
-  sleep 1
-done
-
-NET=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}' keycloak-keycloak)
+# Start infra (Keycloak + MongoDB) and wait until Keycloak HTTP is reachable.
+# This logic has been extracted to a focused helper script that returns the Docker
+# network name so downstream steps can reuse it.
+NET="$("$ROOT_DIR/scripts/ci/auth-integration-test/infra.sh")"
 if [ -z "$NET" ]; then
-  echo "ERROR: could not detect Docker network for keycloak-keycloak" >&2
+  echo "ERROR: infra script failed to return Docker network" >&2
   exit 2
 fi
+echo "Using Docker network: $NET"
 
-echo "Waiting for Keycloak HTTP to respond..."
-for i in {1..120}; do
-  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://keycloak-keycloak:8080/sso/ || echo 000)
-  if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "400" ]; then
-    echo "Keycloak HTTP response: $HTTP_CODE"; break
-  fi
-  echo -n '.'; sleep 2
-done
-
-# Run keycloak setup script inside network
+# Provision Keycloak (migrated to sub-script for maintainability)
 echo "Running Keycloak setup..."
-docker run --rm --network "$NET" -v "$ROOT_DIR":/workdir -w /workdir alpine:3.19 sh -c "apk add --no-cache curl jq openssl bash >/dev/null 2>&1 && KC_INSECURE=false KC_HOST=http://keycloak-keycloak:8080/sso /workdir/scripts/keycloak-setup.sh"
+"$ROOT_DIR/scripts/ci/auth-integration-test/keycloak-provision.sh" "$NET" || { echo "Keycloak provisioning failed"; exit 2; }
+
+# Build and start frontend so we can exercise the real frontend callback path
+# Rebuild frontend with network-aware VITE_* values so the browser can reach Keycloak and auth service
+echo "Building frontend image with in-network VITE settings..."
+docker build \
+  --build-arg VITE_KEYCLOAK_URL=http://keycloak-keycloak:8080 \
+  --build-arg VITE_AUTH_URL=http://gogotex-auth-integration:8081 \
+  --build-arg VITE_REDIRECT_URI=http://frontend/auth/callback \
+  -t gogotex-frontend:local "$ROOT_DIR/frontend"
+
+echo "Starting frontend service for E2E auth-code test..."
+bash "$ROOT_DIR/gogotex-support-services/up_frontend.sh" || true
+
+# Run Playwright E2E (browser flow) if Playwright is available in CI
+# This step has its own script for better maintainability and a shell-level timeout
+if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
+  echo "Running Playwright E2E test (browser -> Keycloak -> frontend -> auth)..."
+
+  # avoid unbound-variable under set -u; ensure password file is read if present
+  TEST_USER=${TEST_USER:-testuser}
+  TEST_PASS=${TEST_PASS:-$(cat "$ROOT_DIR/gogotex-support-services/keycloak-service/testuser_password.txt" 2>/dev/null || echo "Test123!")}
+
+  # Playwright run timeout (seconds) — shell-level guard to prevent hangs
+  PLAYWRIGHT_RUN_TIMEOUT=${PLAYWRIGHT_RUN_TIMEOUT:-120}
+
+  if ! timeout ${PLAYWRIGHT_RUN_TIMEOUT}s "$ROOT_DIR/scripts/ci/auth-integration-test/playwright.sh"; then
+    echo "Playwright step timed out or failed (timeout=${PLAYWRIGHT_RUN_TIMEOUT}s)"; docker logs keycloak-keycloak 2>/dev/null | sed -n '1,200p' || true
+    if [ "${FAIL_ON_AUTH_CODE:-true}" = "true" ]; then
+      exit 7
+    else
+      echo "WARN: Playwright timed out/failed but continuing (FAIL_ON_AUTH_CODE=false)"
+    fi
+  fi
+fi
+
+# client-verification deferred until CLIENT_TOKEN is available (moved later in script)
 
 # Ensure TEST_USER default is set (avoids unbound variable when -u is set)
 TEST_USER=${TEST_USER:-testuser}
 
-# Which host proxy to use for host-facing checks: "nginx" (default) or "traefik".
-# - nginx -> http://localhost (nginx listens on 80)
-# - traefik -> http://localhost:8082 (Traefik file-provider binds to 8082)
-PROXY=${PROXY:-nginx}
-case "$PROXY" in
-  traefik)
-    PROXY_URL="https://localhost:8443"
-    PROXY_HOST_HEADER_AUTH="auth.local"
-    PROXY_HOST_HEADER_KEYCLOAK="keycloak.local"
-    ;; 
-  *)
-    PROXY_URL="https://localhost"
-    PROXY_HOST_HEADER_AUTH="localhost"
-    PROXY_HOST_HEADER_KEYCLOAK="localhost"
-    ;;
-esac
-echo "Using host proxy: $PROXY (proxy_url=$PROXY_URL)"
+# Use internal nginx proxy on the Docker network (no localhost usage required)
+PROXY_URL=${PROXY_URL:-http://nginx-nginx}
+echo "Using internal proxy: $PROXY_URL"
 
 # diagnostics output folder (created early so we can write debug artifacts)
 DIAG_DIR="${DIAG_DIR:-${ROOT_DIR:-.}/test-output}"
@@ -98,6 +99,41 @@ CLIENT_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "
 if [ -z "$CLIENT_TOKEN" ]; then
   echo "Failed to obtain client token"; exit 3
 fi
+
+# Verify client configuration (ensure directAccessGrantsEnabled and standardFlowEnabled)
+echo "Verifying Keycloak client configuration for 'gogotex-backend'..."
+# Prefer using an admin token for management operations (admin-cli). Fall back
+# to CLIENT_TOKEN for read-only checks if admin token cannot be obtained.
+ADMIN_PW=$(grep -m1 '^KEYCLOAK_ADMIN_PASSWORD=' "$ROOT_DIR/gogotex-support-services/.env" | sed -E 's/^[^=]+=//')
+ADMIN_TOKEN=""
+if [ -n "$ADMIN_PW" ]; then
+  ADMIN_TOKEN=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -d "client_id=admin-cli" -d "username=admin" -d "password=$ADMIN_PW" -d "grant_type=password" http://keycloak-keycloak:8080/sso/realms/master/protocol/openid-connect/token | jq -r '.access_token // empty') || true
+fi
+# Use admin token when available, otherwise use client token for read-only checks.
+AUTH_HEADER="Authorization: Bearer ${ADMIN_TOKEN:-$CLIENT_TOKEN}"
+CLIENT_CONF=$(docker run --rm --network "$NET" curlimages/curl -sS -H "$AUTH_HEADER" "http://keycloak-keycloak:8080/sso/admin/realms/gogotex/clients?clientId=gogotex-backend" | jq 'if type=="array" then .[0] else . end') || true
+if [ -z "$CLIENT_CONF" ] || [ "$CLIENT_CONF" = "null" ]; then
+  echo "ERROR: could not fetch client configuration after setup"; exit 5
+fi
+DIRECT_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.directAccessGrantsEnabled')
+STANDARD_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.standardFlowEnabled')
+if [ "$DIRECT_ENABLED" != "true" ] || [ "$STANDARD_ENABLED" != "true" ]; then
+  echo "Client missing required grant settings; attempting to patch client..."
+  if [ -z "$ADMIN_TOKEN" ]; then
+    echo "Cannot patch client: admin token not available. Please ensure KEYCLOAK_ADMIN_PASSWORD is set in $ROOT_DIR/gogotex-support-services/.env"; exit 6
+  fi
+  CLIENT_ID_INTERNAL=$(echo "$CLIENT_CONF" | jq -r '.id')
+  UPDATED=$(echo "$CLIENT_CONF" | jq '.directAccessGrantsEnabled = true | .standardFlowEnabled = true')
+  docker run --rm --network "$NET" -v "$ROOT_DIR":/workdir -w /workdir curlimages/curl -sS -X PUT -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" "http://keycloak-keycloak:8080/sso/admin/realms/gogotex/clients/$CLIENT_ID_INTERNAL" -d "$UPDATED" || true
+  echo "Patched client configuration. Re-fetching..."
+  CLIENT_CONF=$(docker run --rm --network "$NET" curlimages/curl -sS -H "Authorization: Bearer $ADMIN_TOKEN" "http://keycloak-keycloak:8080/sso/admin/realms/gogotex/clients?clientId=gogotex-backend" | jq 'if type=="array" then .[0] else . end') || true
+  DIRECT_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.directAccessGrantsEnabled')
+  STANDARD_ENABLED=$(echo "$CLIENT_CONF" | jq -r '.standardFlowEnabled')
+  if [ "$DIRECT_ENABLED" != "true" ] || [ "$STANDARD_ENABLED" != "true" ]; then
+    echo "ERROR: client configuration still not patched correctly"; echo "$CLIENT_CONF" | sed -n '1,200p'; exit 6
+  fi
+  echo "Client configuration patched successfully"
+fi
 # Password-grant token for TEST_USER (used for /api/v1/me checks)
 
 
@@ -105,16 +141,21 @@ fi
 AUTH_IMAGE="gogotex-auth:ci"
 AUTH_CONTAINER_NAME="gogotex-auth-integration"
 
-# If a long-running 'gogotex-auth' container already exists, reuse it for the
-# integration checks instead of starting a new container (helps local/dev runs).
-if docker ps --format '{{.Names}}' | grep -q '^gogotex-auth$'; then
-  echo "Found existing 'gogotex-auth' container — reusing it for integration checks"
-  AUTH_CONTAINER_NAME="gogotex-auth"
-fi
+# Always run a fresh integration container for deterministic tests (use
+# AUTH_CONTAINER_NAME=gogotex-auth to explicitly reuse a long-running container).
+# Remove any previous integration container with the same name to avoid conflicts.
+docker rm -f "gogotex-auth-integration" >/dev/null 2>&1 || true
+AUTH_CONTAINER_NAME="gogotex-auth-integration"
 
 # Build image
 echo "Building auth image $AUTH_IMAGE..."
-docker build -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
+if docker buildx version >/dev/null 2>&1; then
+  echo "Using docker buildx (BuildKit)"
+  docker buildx build --load -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
+else
+  echo "docker buildx not available — falling back to classic docker build"
+  docker build -t "$AUTH_IMAGE" "$ROOT_DIR/backend/go-services"
+fi
 
 # Ensure we always clean up the auth container when the script exits
 cleanup() {
@@ -133,45 +174,85 @@ trap cleanup EXIT
 # If reusing an already-running 'gogotex-auth' container we don't re-create it.
 echo "Starting auth service container ($AUTH_CONTAINER_NAME) on network $NET..."
 if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
-  echo "Reusing existing container '$AUTH_CONTAINER_NAME' — not creating a new one"
-else
-  # Remove any previous container with same name to avoid conflicts
-  docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true
-  # Start the container
-  if ! docker run -d --name "$AUTH_CONTAINER_NAME" --network "$NET" -e KC_INSECURE=true \
-    -e ALLOW_INSECURE_TOKEN=true \
-    -e KEYCLOAK_URL=http://keycloak-keycloak:8080/sso \
-    -e KEYCLOAK_REALM=gogotex \
-    -e KEYCLOAK_CLIENT_ID=gogotex-backend \
-    -e KEYCLOAK_CLIENT_SECRET="$CLIENT_SECRET" \
-    -e MONGODB_URI=mongodb://mongodb-mongodb:27017 \
-    -e MONGODB_DATABASE=gogotex \
-    -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
-    "$AUTH_IMAGE"; then
-    echo "ERROR: failed to start auth container"; exit 5
-  fi
-fi
+    echo "Reusing existing container '$AUTH_CONTAINER_NAME' — not creating a new one"
+  else
+    # Remove any previous container with same name to avoid conflicts
+    docker rm -f "$AUTH_CONTAINER_NAME" >/dev/null 2>&1 || true
+    # Start the container (no host port publishing — tests run inside the same Docker network)
+    if ! docker run -d --name "$AUTH_CONTAINER_NAME" --network "$NET" -e KC_INSECURE=true \
+      -e ALLOW_INSECURE_TOKEN=true \
+      -e KEYCLOAK_URL=http://keycloak-keycloak:8080/sso \
+      -e KEYCLOAK_REALM=gogotex \
+      -e KEYCLOAK_CLIENT_ID=gogotex-backend \
+      -e KEYCLOAK_CLIENT_SECRET="$CLIENT_SECRET" \
+      -e MONGODB_URI=mongodb://mongodb-mongodb:27017 \
+      -e MONGODB_DATABASE=gogotex \
+      -e SERVER_HOST=0.0.0.0 -e SERVER_PORT=8081 \
+      -e REDIS_HOST=redis-redis -e REDIS_PORT=6379 -e RATE_LIMIT_USE_REDIS=true \
+      "$AUTH_IMAGE"; then
+      echo "ERROR: failed to start auth container"; exit 5
+    fi
 
+    # we created a fresh integration container
+    CREATED_AUTH_CONTAINER=true
+
+    # debug: expose started container id + IP. wait for network IP to appear (docker DNS sometimes lags)
+    CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
+    echo "DEBUG: started auth container id=$CID"
+    if [ -n "$CID" ]; then
+      # wait up to 30s for the container to acquire an IP on the desired network
+      for _i in {1..60}; do
+        # prefer the IP on the `tex-network` (if present)
+        debug_ip=$(docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{if eq $k "tex-network"}}{{$v.IPAddress}}{{end}}{{end}}' "$CID" 2>/dev/null || true)
+        # fallback to any IP if `tex-network` key missing
+        if [ -z "$debug_ip" ]; then
+          debug_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+        fi
+        if [ -n "$debug_ip" ]; then
+          echo "DEBUG: started auth container ip=$debug_ip"; break
+        fi
+        # attempt to (re)connect container to the network if not present
+        docker network connect "$NET" "$CID" >/dev/null 2>&1 || true
+        sleep 1
+      done
+      # final echo (may be empty if IP still missing)
+      debug_ip=${debug_ip:-}
+      echo "DEBUG: started auth container ip=${debug_ip:-<none>}"
+    fi
+  fi
 # Determine how to reach the auth service for health/metrics checks.
-# - If we reused a running container, call the host-mapped port (localhost:8081)
-# - Otherwise, use in-network container name
-if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
-  AUTH_HOST="localhost:8081"
+# Strategy:
+# Prefer in-network access to the auth container (container IP or container name — no localhost)
+# 2) Otherwise prefer the container's network IP (avoids DNS timing issues).
+# 3) Fallback to container name when IP is not available.
+# Prefer container IP or container name for in-network access (no localhost)
+CID=$(docker ps -q -f "name=^${AUTH_CONTAINER_NAME}$" || true)
+if [ -n "$CID" ]; then
+  CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CID" 2>/dev/null || true)
+  if [ -n "$CONTAINER_IP" ]; then
+    AUTH_HOST="$CONTAINER_IP:8081"
+  else
+    AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
+  fi
 else
   AUTH_HOST="$AUTH_CONTAINER_NAME:8081"
 fi
 
-# Wait for auth service to be healthy (HTTP /health)
+# Wait for auth service to be fully ready (HTTP /ready) — this ensures handlers/deps are initialized
 for i in {1..60}; do
-  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/health || echo 000)
-  echo "Auth HTTP: $HTTP_CODE"
+  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://$AUTH_HOST/ready || echo 000)
+  echo "Auth ready HTTP: $HTTP_CODE"
   if [ "$HTTP_CODE" = "200" ]; then
-    echo 'Auth service listening'; break
+    echo 'Auth service ready'; break
+  fi
+  # Print short container logs for early debugging on first few iterations
+  if [ $i -le 3 ]; then
+    docker logs "$AUTH_CONTAINER_NAME" 2>/dev/null | sed -n '1,80p' || true
   fi
   sleep 1
 done
 if [ "$HTTP_CODE" != "200" ]; then
-  echo "Auth service did not become ready in time"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,200p'; exit 6
+  echo "Auth service did not become ready in time"; docker logs "$AUTH_CONTAINER_NAME" | sed -n '1,400p'; exit 6
 fi
 
 # --- Rate-limit + metrics verification (global middleware) ---
@@ -218,7 +299,8 @@ REDIRECT_URI=""
 if [ "${FORCE_CB_SINK:-false}" = "true" ]; then
   echo "FORCE_CB_SINK=true: using callback sink to capture authorization code"
   docker rm -f cb-sink >/dev/null 2>&1 || true
-  docker run -d --name cb-sink --network "$NET" -p 127.0.0.1:${CB_SINK_HOST_PORT}:3000 python:3.11-slim sh -c "python -u -m http.server 3000" >/dev/null
+  # Run callback sink on the internal network (no host port publishing required)
+  docker run -d --name cb-sink --network "$NET" python:3.11-slim sh -c "python -u -m http.server 3000" >/dev/null
   # trigger the auth request (headless login will POST credentials and Keycloak will redirect to cb-sink)
   # perform a headless Python POST that follows redirects so Keycloak will redirect to cb-sink (reliable for required-action flows)
   docker run --rm --network "$NET" -e TEST_USER="$TEST_USER" -e TEST_PASS="$TEST_PASS" python:3.11-slim sh -s <<'PY' || true
@@ -268,7 +350,8 @@ else
   docker rm -f cb-sink >/dev/null 2>&1 || true
   echo "Starting callback sink (cb-sink) on network $NET (preheadless)..."
   docker rm -f cb-sink >/dev/null 2>&1 || true
-  docker run -d --name cb-sink --network "$NET" -p 127.0.0.1:${CB_SINK_HOST_PORT}:3000 python:3.11-slim sh -c "python -u -m http.server 3000" >/dev/null
+  # Run callback sink on the internal network (no host port publishing required)
+  docker run -d --name cb-sink --network "$NET" python:3.11-slim sh -c "python -u -m http.server 3000" >/dev/null
   # Wait until cb-sink shows as Up (Docker may need a moment to register DNS)
   for i in {1..6}; do
     STATUS=$(docker ps --filter name=cb-sink --format '{{.Status}}' || true)
@@ -638,15 +721,10 @@ else
   echo "Warning: test user password file not found ($TEST_PASS_FILE); will fall back to client token"
 fi
 
-echo "Calling /api/v1/me on auth service via host proxy ($PROXY_URL/api/v1/me)..."
-# use Host header when routing via Traefik
+echo "Calling /api/v1/me on auth service via internal proxy ($PROXY_URL/api/v1/me)..."
 AUTH_TOKEN=${USER_TOKEN:-$CLIENT_TOKEN}
-if [ "$PROXY" = "traefik" ]; then
-  # Traefik in dev uses self-signed certs; accept them for local CI checks
-  RESP=$(curl --insecure -sS -H "Host: $PROXY_HOST_HEADER_AUTH" -H "Authorization: Bearer $AUTH_TOKEN" "$PROXY_URL/api/v1/me" || true)
-else
-  RESP=$(curl -sS -H "Authorization: Bearer $AUTH_TOKEN" "$PROXY_URL/api/v1/me" || true)
-fi
+# call the internal proxy from the test runner using curl image on the same network
+RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -H "Authorization: Bearer $AUTH_TOKEN" "$PROXY_URL/api/v1/me" || true)
 
 # Basic validation: should include "user" with "sub" or at least claims
 if echo "$RESP" | jq -e '.user.sub' >/dev/null 2>&1; then
