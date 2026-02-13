@@ -32,6 +32,11 @@ type Document struct {
 
 // CompileJob represents a short-lived compile job for Phase‑03 prototyping.
 // It now stores compiled artifacts (PDF + SyncTeX) in-memory for the prototype.
+type SyncEntry struct {
+	Y    float64 `json:"y"`
+	Line int     `json:"line"`
+}
+
 type CompileJob struct {
 	JobID     string    `json:"jobId"`
 	DocID     string    `json:"docId"`
@@ -40,9 +45,10 @@ type CompileJob struct {
 	CreatedAt time.Time `json:"createdAt"`
 
 	// compiled artifacts (not serialized)
-	PDF      []byte `json:"-"`
-	Synctex  []byte `json:"-"`
-	ErrorMsg string `json:"error,omitempty"`
+	PDF        []byte                 `json:"-"`
+	Synctex    []byte                 `json:"-"`
+	SynctexMap map[int][]SyncEntry    `json:"-"`
+	ErrorMsg   string                 `json:"error,omitempty"`
 } 
 
 var (
@@ -408,6 +414,21 @@ func GetSyncTeXMap(c *gin.Context) {
 		return
 	}
 
+	// If we already have a parsed SyncTeX map, return it immediately
+	if job.SynctexMap != nil && len(job.SynctexMap) > 0 {
+		out := map[string]interface{}{"pages": map[string]interface{}{}}
+		pages := out["pages"].(map[string]interface{})
+		for p, arr := range job.SynctexMap {
+			lst := make([]map[string]interface{}, 0, len(arr))
+			for _, e := range arr {
+				lst = append(lst, map[string]interface{}{"y": e.Y, "line": e.Line})
+			}
+			pages[fmt.Sprintf("%d", p)] = lst
+		}
+		c.JSON(http.StatusOK, out)
+		return
+	}
+
 	// locate document content (best-effort)
 	documentsMu.RLock()
 	d, dok := documentsStore[id]
@@ -420,10 +441,71 @@ func GetSyncTeXMap(c *gin.Context) {
 		totalLines = 1
 	}
 
-	// build simple mapping for page 1 only (Phase-03 prototype)
+	// Try to compute a higher-fidelity map using local `synctex` CLI when available
+	if len(job.Synctex) > 0 && len(job.PDF) > 0 {
+		if path, err := exec.LookPath("synctex"); err == nil && path != "" {
+			// create tempdir with PDF + synctex.gz
+			tmpd, err := os.MkdirTemp("", "synctex-parse-")
+			if err == nil {
+				defer os.RemoveAll(tmpd)
+				_ = os.WriteFile(filepath.Join(tmpd, "main.pdf"), job.PDF, 0644)
+				_ = os.WriteFile(filepath.Join(tmpd, "main.synctex.gz"), job.Synctex, 0644)
+
+				// cap lines to probe to avoid long-running loops
+				maxLines := totalLines
+				if maxLines > 500 { maxLines = 500 }
+
+				pageLines := map[int][]int{}
+				rePage := regexp.MustCompile(`Page[: ]+(\d+)`)
+
+				for i := 1; i <= maxLines; i++ {
+					ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+					cmd := exec.CommandContext(ctx, "synctex", "view", "-i", fmt.Sprintf("%d:0:main.tex", i), "-o", "main.pdf")
+					cmd.Dir = tmpd
+					out, _ := cmd.CombinedOutput()
+					cancel()
+					m := rePage.FindSubmatch(out)
+					if len(m) == 2 {
+						p, _ := strconv.Atoi(string(m[1]))
+						pageLines[p] = append(pageLines[p], i)
+					}
+				}
+
+				// if we found any page assignments, build SynctexMap by evenly spacing y within each page
+				if len(pageLines) > 0 {
+					sm := map[int][]SyncEntry{}
+					for p, lines := range pageLines {
+						for idx, ln := range lines {
+							n := float64(len(lines))
+							y := (float64(idx) + 0.5) / n
+							if y < 0 { y = 0 }
+							if y > 1 { y = 1 }
+							sm[p] = append(sm[p], SyncEntry{Y: y, Line: ln})
+						}
+					}
+					compileJobsMu.Lock()
+					job.SynctexMap = sm
+					compileJobsMu.Unlock()
+
+					out := map[string]interface{}{"pages": map[string]interface{}{}}
+					pages := out["pages"].(map[string]interface{})
+					for p, arr := range sm {
+						lst := make([]map[string]interface{}, 0, len(arr))
+						for _, e := range arr {
+							lst = append(lst, map[string]interface{}{"y": e.Y, "line": e.Line})
+						}
+						pages[fmt.Sprintf("%d", p)] = lst
+					}
+					c.JSON(http.StatusOK, out)
+					return
+				}
+			}
+		}
+	}
+
+	// fallback: single-page proportional mapping (existing behavior)
 	entries := []map[string]interface{}{}
 	for i := 1; i <= totalLines; i++ {
-		// place mapping at the line's midpoint (0..1)
 		y := (float64(i)-0.5)/float64(totalLines)
 		if y < 0 { y = 0 }
 		if y > 1 { y = 1 }

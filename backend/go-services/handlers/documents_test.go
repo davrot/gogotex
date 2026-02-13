@@ -213,4 +213,24 @@ func TestCreateUpdateGetDocument(t *testing.T) {
 	require.True(t, ok)
 	_, hasLine := first["line"]
 	require.True(t, hasLine)
+
+	// simulate a pre-computed SynctexMap and ensure handler returns it unchanged
+	compileJobsMu.Lock()
+	if j, ok := compileJobs[jobID]; ok {
+		j.SynctexMap = map[int][]SyncEntry{1: {{Y: 0.1, Line: 1}, {Y: 0.8, Line: 10}}}
+	}
+	compileJobsMu.Unlock()
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/documents/%s/compile/%s/synctex/map", id, readyJob), nil)
+	g.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var mapResp2 map[string]interface{}
+	err = json.Unmarshal(w.Body.Bytes(), &mapResp2)
+	require.NoError(t, err)
+	pages2, ok := mapResp2["pages"].(map[string]interface{})
+	require.True(t, ok)
+	p1b, ok := pages2["1"].([]interface{})
+	require.True(t, ok)
+	require.Equal(t, 2, len(p1b))
 }
