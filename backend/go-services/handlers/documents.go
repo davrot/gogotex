@@ -183,7 +183,10 @@ func CompileDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"jobId": jobID, "status": job.Status, "previewUrl": preview, "name": d.Name})
 }
 
-// PreviewDocument returns a lightweight HTML preview (stub) for the given document.
+// PreviewDocument returns a preview page for the given document.
+// If a ready compile job exists we render a PDF.js-based viewer that loads
+// the compiled PDF and posts click events back to the parent (prototype
+// SyncTeX → editor mapping). Otherwise a lightweight stub is returned.
 func PreviewDocument(c *gin.Context) {
 	id := c.Param("id")
 	documentsMu.RLock()
@@ -193,32 +196,75 @@ func PreviewDocument(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
+
+	// look for a ready compile job for this document
+	var readyJob string
+	compileJobsMu.RLock()
+	for _, j := range compileJobs {
+		if j.DocID == id && j.Status == "ready" {
+			readyJob = j.JobID
+			break
+		}
+	}
+	compileJobsMu.RUnlock()
+
+	if readyJob != "" {
+		pdfURL := fmt.Sprintf("/api/documents/%s/compile/%s/download", id, readyJob)
+		html := fmt.Sprintf(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Preview: %s</title>
+    <style>body{font-family:Inter,Arial,sans-serif;margin:0;padding:12px}#canvas{border:1px solid #ddd}</style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  </head>
+  <body>
+    <h2>PDF preview</h2>
+    <p>Document: <strong>%s</strong> (%s)</p>
+    <canvas id="canvas"></canvas>
+    <script>
+      const url = '%s'
+      const canvas = document.getElementById('canvas')
+      const ctx = canvas.getContext('2d')
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js'
+      pdfjsLib.getDocument(url).promise.then(function(pdf) {
+        pdf.getPage(1).then(function(page) {
+          const scale = 1.25
+          const viewport = page.getViewport({ scale: scale })
+          canvas.width = Math.min(viewport.width, 1024)
+          canvas.height = viewport.height
+          const renderContext = { canvasContext: ctx, viewport: viewport }
+          page.render(renderContext)
+        })
+      }).catch(function(err){
+        const el = document.createElement('pre'); el.textContent = 'Failed to load PDF: '+err; document.body.appendChild(el)
+      })
+      canvas.addEventListener('click', function(ev){
+        try {
+          const rect = canvas.getBoundingClientRect()
+          const y = (ev.clientY - rect.top) / rect.height
+          parent.postMessage({ type: 'pdf-click', page: 1, y: y }, '*')
+        } catch(e) { /* ignore */ }
+      })
+    </script>
+  </body>
+</html>`, d.Name, d.Name, d.ID, pdfURL)
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, html)
+		return
+	}
+
+	// fallback stub when no compiled PDF is available
 	html := fmt.Sprintf(`<html><head><meta charset="utf-8"><title>Preview: %s</title>
 <script>
-// Prototype preview → parent SyncTeX postMessage bridge.
-// Clicking elements with data-line will post { type: 'synctex-click', line: <n> } to the parent window.
 function sendLine(line){ try { parent.postMessage({ type: 'synctex-click', line: line }, '*') } catch(e){} }
-window.addEventListener('click', function(ev){
-  var t = ev.target;
-  var ln = 1
-  if (t && t.dataset && t.dataset.line) ln = Number(t.dataset.line)
-  else ln = Math.max(1, Math.floor((ev.clientY / window.innerHeight) * 50))
-  sendLine(ln)
-})
+window.addEventListener('click', function(ev){ var t = ev.target; var ln = t && t.dataset && t.dataset.line ? Number(t.dataset.line) : 1; sendLine(ln) })
 </script>
-</head><body>
-  <h2>PDF preview (stub)</h2>
-  <p>Document: <strong>%s</strong> (%s)</p>
-  <p>This is a placeholder preview for Phase‑03. Click anywhere to jump to the editor (prototype SyncTeX).</p>
-  <div id="pdf" style="height:70vh;border:1px solid #ddd;padding:12px;overflow:auto;">
-    <p data-line="1">Page 1 — top (maps to line 1)</p>
-    <p data-line="5">Page 1 — middle (maps to line 5)</p>
-    <p data-line="10">Page 1 — bottom (maps to line 10)</p>
-  </div>
-</body></html>`, d.Name, d.Name, d.ID)
+</head><body><h2>PDF preview (stub)</h2><p>Document: <strong>%s</strong> (%s)</p><div id="pdf" style="height:70vh;border:1px solid #ddd;padding:12px;overflow:auto;"><p data-line="1">Page 1 — top (maps to line 1)</p><p data-line="5">Page 1 — middle (maps to line 5)</p><p data-line="10">Page 1 — bottom (maps to line 10)</p></div></body></html>`, d.Name, d.Name, d.ID)
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(http.StatusOK, html)
 }
+
 
 // GetCompileLogs returns the current compile job status and logs for a document (Phase‑03).
 func GetCompileLogs(c *gin.Context) {

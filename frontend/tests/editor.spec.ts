@@ -216,6 +216,12 @@ test.describe('Editor (Phase‑03)', () => {
       await page.waitForSelector('.synctex-available', { timeout: 2000 })
       const synBase64 = await page.evaluate(() => localStorage.getItem('gogotex.editor.synctex'))
       expect(synBase64).toBeTruthy()
+
+      // Clicking the preview should move the editor caret (postMessage bridge)
+      await page.frameLocator('iframe[title="preview"]').locator('p[data-line="5"]').click()
+      await page.waitForTimeout(200)
+      const caretLine = await page.evaluate(() => localStorage.getItem('gogotex.editor.caretLine'))
+      expect(caretLine).toBe('5')
     } else {
       // Fallback: exercise autosave logic directly
       await page.evaluate(() => { try { localStorage.setItem('gogotex.editor.content', '\\documentclass{article}\\\n') } catch (e) {} })

@@ -259,6 +259,17 @@ export const EditorPage: React.FC = () => {
         const d = ev.data || {}
         if (d && d.type === 'synctex-click' && typeof d.line === 'number') {
           editorRef.current?.goToLine(d.line)
+          return
+        }
+        // PDF viewer posts { type: 'pdf-click', page: n, y: 0..1 }
+        if (d && d.type === 'pdf-click' && typeof d.y === 'number') {
+          // approximate mapping: proportion of page height -> document line
+          try {
+            const txt = editorRef.current?.getValue() || ''
+            const totalLines = Math.max(1, txt.split('\n').length)
+            const line = Math.max(1, Math.min(totalLines, Math.round(d.y * totalLines)))
+            editorRef.current?.goToLine(line)
+          } catch (e) { /* ignore */ }
         }
       } catch (e) { /* ignore */ }
     }
