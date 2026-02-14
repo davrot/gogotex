@@ -448,3 +448,40 @@ func TestRunCompileJob_PersistsArtifacts(t *testing.T) {
 	require.Equal(t, job.JobID, persisted.JobID)
 	require.Equal(t, job.OutputPDFKey, persisted.PDFKey)
 }
+
+// Ensure persistCompileFunc publishes a lightweight compile metadata message to Redis (channel: compile:updates).
+func TestPersistCompile_PublishesToRedis(t *testing.T) {
+	m, err := mr.Run()
+	require.NoError(t, err)
+	defer m.Close()
+
+	// set env so persistCompileFunc will attempt Redis publish
+	require.NoError(t, os.Setenv("REDIS_HOST", "127.0.0.1"))
+	require.NoError(t, os.Setenv("REDIS_PORT", m.Port()))
+	defer func() {
+		_ = os.Unsetenv("REDIS_HOST")
+		_ = os.Unsetenv("REDIS_PORT")
+	}()
+
+	// subscribe with a real redis client against miniredis so we can observe the publish
+	client := redis.NewClient(&redis.Options{Addr: m.Addr()})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	pubsub := client.Subscribe(ctx, "compile:updates")
+	defer pubsub.Close()
+
+	job := &CompileJob{JobID: "rjob-1", DocID: "docR", Status: "ready", CreatedAt: time.Now(), OutputPDFKey: "k.pdf", SynctexKey: "k.synctex"}
+
+	// call the real persistCompileFunc (it will spawn a goroutine to publish)
+	require.NoError(t, persistCompileFunc(context.Background(), job))
+
+	// wait for a message on the subscribe channel
+	ch := pubsub.Channel()
+	select {
+	case msg := <-ch:
+		require.Contains(t, msg.Payload, "rjob-1")
+		require.Contains(t, msg.Payload, "docR")
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for compile:updates message")
+	}
+}
