@@ -16,7 +16,6 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.17.9
-	github.com/minio/minio-go/v7 v7.0.23
 	golang.org/x/time v0.4.0
 )
 

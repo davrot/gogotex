@@ -285,22 +285,7 @@ func requestAuthCodeToken(ctx context.Context, host, realm, clientID, clientSecr
 	logger.Infof("requestAuthCodeToken: tokenURL=%s client_id=%s client_secret_set=%t redirect_uri=%s", tokenURL, clientID, clientSecret != "", redirectURI)
 	for attempt := 1; attempt <= 2; attempt++ {
 		// Use HTTP Basic auth for client authentication (more robust across Keycloak configs)
-		// Build raw form string (we keep the redacted version for logs)
-		v := url.Values{}
-		for k, vv := range formValues {
-			v.Set(k, vv)
-		}
-		bodyStrRaw := v.Encode()
-		redactedBody := bodyStrRaw
-		if clientSecret != "" {
-			redactedBody = strings.ReplaceAll(redactedBody, url.QueryEscape(clientSecret), "<redacted>")
-		}
-		// replace code with length-only for safety
-		if cv, ok := formValues["code"]; ok {
-			redactedBody = strings.ReplaceAll(redactedBody, url.QueryEscape(cv), fmt.Sprintf("<len=%d>", len(cv)))
-		}
-
-		form := strings.NewReader(bodyStrRaw)
+		form := urlValues(formValues)
 		req, err := http.NewRequestWithContext(ctx, "POST", tokenURL, form)
 		if err != nil {
 			if attempt == 2 {
@@ -310,42 +295,35 @@ func requestAuthCodeToken(ctx context.Context, host, realm, clientID, clientSecr
 			continue
 		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		// Log headers (redact Authorization) and the redacted body so CI has full context
-		hdrs := map[string]string{}
-		for k, vv := range req.Header {
-			hdrs[k] = strings.Join(vv, ",")
+		// Diagnostic: log the outgoing token request (without secrets) to aid CI debugging
+		fv := map[string]string{}
+		for k, v := range formValues {
+			if k == "client_secret" {
+				fv[k] = "<redacted>"
+			} else if k == "code" {
+				fv[k] = fmt.Sprintf("<len=%d>", len(v))
+			} else {
+				fv[k] = v
+			}
 		}
-		if a := req.Header.Get("Authorization"); a != "" {
-			hdrs["Authorization"] = "<present>"
-		}
-		logger.Infof("requestAuthCodeToken: outgoing-request url=%s headers=%v body=%s", tokenURL, hdrs, redactedBody)
-		logger.Infof("requestAuthCodeToken: outgoing-form-redacted=%s", redactedBody)
-
+		logger.Debugf("requestAuthCodeToken: POST %s form=%v", tokenURL, fv)
+		// Also emit an INFO-level redacted form so CI logs always capture the outgoing
+		// parameters even when DEBUG logs are filtered.
+		logger.Infof("requestAuthCodeToken: outgoing-form-redacted=%v", fv)
 		// Primary attempt: use client_secret in form body (client_secret_post).
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil && resp.StatusCode == http.StatusUnauthorized {
-			// Read and log Keycloak response body/headers for diagnostics
+			// If Keycloak rejects client credentials for client_secret_post, retry using HTTP Basic auth.
 			b, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
 			bodyStr := string(b)
-			logger.Warnf("requestAuthCodeToken: primary exchange returned 401; keycloak_resp_body=%s keycloak_resp_headers=%v", strings.TrimSpace(bodyStr), resp.Header)
-
-			// Write a temporary debug file inside the container (redacted) for post-mortem
-			_ = os.WriteFile("/tmp/requestAuthCodeToken.debug.txt", []byte(fmt.Sprintf("tokenURL=%s\nrequest_headers=%v\nrequest_body=%s\nkeycloak_resp_status=%d\nkeycloak_resp_body=%s\n", tokenURL, hdrs, redactedBody, resp.StatusCode, bodyStr)), 0600)
-
-			logger.Warnf("requestAuthCodeToken: retrying with HTTP Basic auth (fallback)")
-
+			logger.Warnf("requestAuthCodeToken: primary exchange returned 401, retrying with HTTP Basic; keycloak_resp=%s", strings.TrimSpace(bodyStr))
 			// build a new request and try Basic auth
-			form2 := strings.NewReader(bodyStrRaw)
+			form2 := urlValues(formValues)
 			req2, err2 := http.NewRequestWithContext(ctx, "POST", tokenURL, form2)
 			if err2 == nil {
 				req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-				if clientSecret != "" {
-					req2.SetBasicAuth(clientID, clientSecret)
-					logger.Infof("requestAuthCodeToken: retry-request Authorization=<present> (Basic)")
-				} else {
-					logger.Infof("requestAuthCodeToken: retry-request Authorization=<missing-client-secret>")
-				}
+				req2.SetBasicAuth(clientID, clientSecret)
 				resp, err = http.DefaultClient.Do(req2)
 			}
 		}
