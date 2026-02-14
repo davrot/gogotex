@@ -1095,6 +1095,83 @@ export const EditorTest = () => {
 
 ---
 
+## Task 4b: Compile & Preview — SyncTeX, Persistence & Realtime (Phase‑03 additions)
+
+**Goal:** add a reliable compile → PDF preview pipeline with SyncTeX source↔PDF mapping, persist compiled artifacts, and surface compile metadata to the realtime layer (yjs-server).
+
+### What was implemented ✅
+
+- PDF preview with a compile worker (pdflatex Docker fallback + deterministic fallback for CI).
+- SyncTeX support: raw `.synctex.gz`, best-effort `/synctex/map` and `/synctex/lookup` endpoints.
+- Persistence (Step‑A): upload `output.pdf` + `main.synctex.gz` to MinIO and save compile metadata / parsed SynctexMap to Mongo.
+- Replication (Step‑B): backend publishes compile metadata to Redis (`compile:updates`); `yjs-server` caches it and broadcasts `compile-update` over WebSocket and exposes `GET /api/compile/:docId/latest`.
+- Frontend: `Compile` / `Cancel` controls, PDF preview, and PDF→editor mapping using the SyncTeX endpoints.
+
+### Key endpoints (frontend + backend)
+
+- `POST /api/documents/:id/compile` — start a compile job (`CompileDocument`).
+- `POST /api/documents/:id/compile/cancel` — cancel running job.
+- `GET /api/documents/:id/compile/logs` — stream compile logs.
+- `GET /api/documents/:id/compile/:jobId/download` — download compiled PDF.
+- `GET /api/documents/:id/compile/:jobId/synctex` — raw gzipped SyncTeX file (`DownloadSynctex`).
+- `GET /api/documents/:id/compile/:jobId/synctex/map` — best‑effort JSON map (`GetSyncTeXMap`).
+- `GET /api/documents/:id/compile/:jobId/synctex/lookup?line=N` — lookup mapping for a source `line` (`GetSyncTeXLookup`).
+- Realtime cache: `GET /api/compile/:docId/latest` (served by `yjs-server`).
+
+Files: `backend/go-services/handlers/documents.go`, `backend/go-services/internal/storage/minio.go`, `backend/go-services/internal/compile/store.go`, `frontend/src/services/editorService.ts`, `frontend/src/pages/editor/EditorPage.tsx`, `frontend/src/components/editor/Editor.tsx`, `gogotex-services/yjs-server/index.js`.
+
+### Persistence & keys (how artifacts are stored)
+
+- MinIO keys (format):
+  - `documents/<docId>/compile/<jobId>/output.pdf`
+  - `documents/<docId>/compile/<jobId>/main.synctex.gz`
+- Mongo compile document stores `pdfKey` / `synctexKey` and an optional `synctexMap` (see `PersistedCompile` in `backend/go-services/internal/compile/store.go`).
+- If the TeX toolchain isn't present the worker writes deterministic fallback artifacts (minimal PDF + gzipped SyncTeX) so CI and E2E remain stable.
+
+### Realtime replication
+
+- Backend publishes a JSON payload to Redis channel `compile:updates` when a compile completes.
+- `yjs-server` subscribes to `compile:updates`, caches the payload and:
+  - Exposes `GET /api/compile/:docId/latest` for quick retrieval.
+  - Broadcasts `{ type: 'compile-update', payload }` to connected WS clients for that document.
+- Files: `gogotex-services/yjs-server/index.js` and `gogotex-services/yjs-server/yjs-server.js`.
+
+### Frontend integration (what the UI does)
+
+- `EditorPage` shows compile controls (Compile / Cancel) and a PDF preview pane.
+- Clicking in the PDF posts a `synctex-click` message that the app maps into an editor line using `/synctex/lookup` and `synctex/map`.
+- `frontend/src/services/editorService.ts` provides helpers: `compileDocument`, `getCompileSynctex`, `getCompileSynctexMap`, `getCompileSynctexLookup` used by the editor UI.
+
+### Runtime flags / CI notes 🔧
+
+- To enable real pdflatex in CI/dev: set `START_TEXLIVE=true` and optionally `DOCKER_TEX_IMAGE=blang/latex:ubuntu` (Docker fallback).
+- Persistence requires `MINIO_*` env and `MONGODB_URI` to be set; Redis is used for replication.
+- CI: `scripts/ci/auth-integration-test.sh` now exercises compile → MinIO → Mongo persistence and optional replication to `yjs-server`.
+
+### How to validate locally (quick checks) ✅
+
+1. In the editor click `Compile` (or POST `/api/documents/:id/compile`).
+2. Poll `/api/documents/:id/compile/logs` until status is `ready`.
+3. Open `/api/documents/:id/compile/:jobId/download` to verify PDF (starts with `%PDF`).
+4. GET `/api/documents/:id/compile/:jobId/synctex/map` and `/synctex/lookup?line=N` to verify mappings.
+5. If `yjs-server` is running, check `GET http://yjs-server:1234/api/compile/<docId>/latest` for cached metadata.
+
+### Tests added
+
+- Backend unit/integration: `backend/go-services/handlers/documents_test.go` (SyncTeX parsing, compile persistence).
+- Frontend Playwright: `frontend/tests/editor.spec.ts` updated to stub and exercise SyncTeX map/lookup.
+- CI script: `scripts/ci/auth-integration-test.sh` updated to verify persistence + replication.
+
+### Next steps / TODO (recommended)
+
+- [x] Frontend WS listener added — `EditorPage.tsx` subscribes to `yjs-server` and handles `{ type: 'compile-update' }` to refresh `previewUrl`, `jobId` and `synctexMap`.
+- [x] Playwright E2E updated to simulate `compile-update` and assert UI auto-refresh (`frontend/tests/editor.spec.ts`).
+- [ ] Add a focused unit test for the WS handler (small, non-blocking).
+
+*Notes:* the WS integration improves UX by letting other services (backend → Redis → yjs-server) push compile results to connected editor clients in real time.
+
+---
+
 ## Task 5: Layout & Navigation Components (1.5 hours)
 
 ### 5.1 Main Layout

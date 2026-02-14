@@ -275,6 +275,7 @@ export const EditorPage: React.FC = () => {
     const iv = setInterval(() => { void processSaveQueue() }, 3000)
     const onOnline = () => { void processSaveQueue() }
     window.addEventListener('online', onOnline)
+
     // receive sync messages from preview iframe (synctex click)
     const onMessage = (ev: MessageEvent) => {
       try {
@@ -310,12 +311,90 @@ export const EditorPage: React.FC = () => {
     }
     window.addEventListener('message', onMessage)
 
+    // --- Realtime: subscribe to yjs-server for compile updates (auto-refresh preview / SyncTeX)
+    // Connect when a document is attached; server broadcasts `{ type: 'compile-update', payload }`.
+    let ws: WebSocket | null = null
+    const connectRealtime = () => {
+      if (!docId) return
+      try {
+        const defaultHost = `ws://${window.location.hostname}:1234`
+        const base = (import.meta.env as any).VITE_YJS_WS_URL || defaultHost
+        // connect to path matching document id so yjs-server will route broadcasts
+        ws = new WebSocket(`${base}/${docId}`)
+        ws.onopen = () => {
+          // no-op; connection established
+          console.debug('[realtime] connected', docId)
+        }
+        ws.onmessage = async (ev) => {
+          try {
+            const data = typeof ev.data === 'string' ? JSON.parse(ev.data) : null
+            if (!data || data.type !== 'compile-update') return
+            const payload = data.payload || {}
+            const pid = payload.docId || payload.docID || payload.documentId
+            if (pid && pid !== docId) return
+
+            // update preview / job id immediately
+            if (payload.previewUrl) setCompilePreviewUrl(payload.previewUrl)
+            if (payload.jobId || payload.jobID) setCompileJobId(payload.jobId || payload.jobID)
+
+            // if payload includes a synctexMap, use it directly
+            const pm = payload.synctexMap || payload.synctex_map || payload.SynctexMap
+            if (pm && (pm.pages || Object.keys(pm).length > 0)) {
+              try {
+                const pages: Record<number, Array<{ y: number; line: number }>> = {}
+                const rawPages = pm.pages ?? pm
+                for (const k of Object.keys(rawPages)) {
+                  pages[Number(k)] = (rawPages[k] as any[]).map(it => ({ y: Number(it.y), line: Number(it.line) }))
+                }
+                setSynctexMap(pages)
+                setSynctexAvailable(true)
+                return
+              } catch (e) {
+                // fallthrough to try fetching
+              }
+            }
+
+            // best-effort: fetch synctex map for the job if available
+            try {
+              const svc = await import('../../services/editorService')
+              const jobId = payload.jobId || payload.jobID
+              if (jobId) {
+                const map = await svc.editorService.getCompileSynctexMap(docId, jobId)
+                if (map && map.pages) {
+                  const pages: Record<number, Array<{ y: number; line: number }>> = {}
+                  for (const k of Object.keys(map.pages)) {
+                    pages[Number(k)] = (map.pages as any)[k].map((it: any) => ({ y: Number(it.y), line: Number(it.line) }))
+                  }
+                  setSynctexMap(pages)
+                  setSynctexAvailable(true)
+                }
+              }
+            } catch (e) {
+              // ignore fetch errors
+            }
+          } catch (e) {
+            console.warn('[realtime] ws message parse error', e)
+          }
+        }
+        ws.onclose = () => { console.debug('[realtime] ws closed', docId); ws = null }
+        ws.onerror = (err) => { console.warn('[realtime] ws error', err) }
+      } catch (e) {
+        console.warn('[realtime] connection failed', e)
+      }
+    }
+
+    // open connection immediately if docId present
+    if (docId) connectRealtime()
+
     // try to process any existing queue on mount
     void processSaveQueue()
     return () => {
       clearInterval(iv)
       window.removeEventListener('online', onOnline)
       window.removeEventListener('message', onMessage)
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.close() } catch (e) { /* ignore */ }
+      }
     }
   }, [docId])
 

@@ -375,3 +375,76 @@ func TestParseSynctexGzipRobustPatterns(t *testing.T) {
 	require.Equal(t, float64(1), m2["line"].(float64))
 	require.InDelta(t, 0.5, m2["y"].(float64), 0.001)
 }
+
+func TestRunCompileJob_PersistsArtifacts(t *testing.T) {
+	// prepare a compiling job and ensure fallback path executes
+	jobID := fmt.Sprintf("job_%d", time.Now().UnixNano())
+	job := &CompileJob{JobID: jobID, DocID: "docX", Status: "compiling", Logs: "", CreatedAt: time.Now()}
+
+	// override minioUploadFunc to capture uploads
+	uploads := map[string][]byte{}
+	uDone := make(chan struct{}, 2)
+	oldUpload := minioUploadFunc
+	minioUploadFunc = func(ctx context.Context, key string, data []byte, contentType string) error {
+		uploads[key] = append([]byte(nil), data...)
+		select {
+		case uDone <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	defer func() { minioUploadFunc = oldUpload }()
+
+	// override persistCompileFunc to capture persisted record
+	var persisted *compilestore.PersistedCompile
+	pDone := make(chan struct{}, 1)
+	oldPersist := persistCompileFunc
+	persistCompileFunc = func(ctx context.Context, j *CompileJob) error {
+		persisted = &compilestore.PersistedCompile{JobID: j.JobID, DocID: j.DocID, Status: j.Status, PDFKey: j.OutputPDFKey, SynctexKey: j.SynctexKey}
+		select {
+		case pDone <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	defer func() { persistCompileFunc = oldPersist }()
+
+	// run worker (uses fallback minimal PDF + synctex)
+	runCompileJob(job, "some content", "main.tex")
+
+	// wait for both uploads + persistence (with timeout)
+	wait := time.After(2 * time.Second)
+	count := 0
+	for count < 2 {
+		select {
+		case <-uDone:
+			count++
+		case <-wait:
+			t.Fatalf("timeout waiting for uploads")
+		}
+	}
+	select {
+	case <-pDone:
+	default:
+		t.Fatalf("persist not called")
+	}
+
+	// assert job was marked ready and keys set
+	if job.Status != "ready" {
+		t.Fatalf("expected job ready, got %s", job.Status)
+	}
+	if job.OutputPDFKey == "" || job.SynctexKey == "" {
+		t.Fatalf("expected persisted keys to be set")
+	}
+	// ensure uploads recorded
+	if _, ok := uploads[job.OutputPDFKey]; !ok {
+		t.Fatalf("pdf not uploaded")
+	}
+	if _, ok := uploads[job.SynctexKey]; !ok {
+		t.Fatalf("synctex not uploaded")
+	}
+	// ensure persisted metadata captured
+	require.NotNil(t, persisted)
+	require.Equal(t, job.JobID, persisted.JobID)
+	require.Equal(t, job.OutputPDFKey, persisted.PDFKey)
+}

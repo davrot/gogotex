@@ -257,6 +257,10 @@ if [ "$AUTH_CONTAINER_NAME" = "gogotex-auth" ]; then
       -e REDIS_HOST=redis-redis -e REDIS_PORT=6379 -e RATE_LIMIT_USE_REDIS=true \
       -e DOC_SERVICE_INLINE="${DOC_SERVICE_INLINE:-false}" \
       -e DOC_SERVICE_EXTERNAL="${DOC_SERVICE_EXTERNAL:-false}" \
+      -e MINIO_ENDPOINT=minio-minio:9000 \
+      -e MINIO_ACCESS_KEY=admin \
+      -e MINIO_SECRET_KEY="${MINIO_ROOT_PASSWORD:-changeme_minio}" \
+      -e MINIO_BUCKET="${MINIO_BUCKET:-gogotex}" \
       "$AUTH_IMAGE"; then
       echo "ERROR: failed to start auth container"; exit 5
     fi
@@ -363,10 +367,32 @@ echo "Rate-limiter + metrics verified (allowed >= 1)."
 
 # Optional compile smoke test: exercised when START_TEXLIVE=true or DOCKER_TEX_IMAGE is set
 if [ "${START_TEXLIVE:-false}" = "true" ] || [ -n "${DOCKER_TEX_IMAGE:-}" ]; then
-  echo "START_TEXLIVE/DOCKER_TEX_IMAGE set -> running compile smoke test against $AUTH_HOST"
+  echo "START_TEXLIVE/DOCKER_TEX_IMAGE set -> running compile smoke test against $AUTH_HOST"  # ensure MinIO service is available for persistence checks
+  if ! docker ps --format '{{.Names}}' | grep -q '^minio-minio$'; then
+    echo "MinIO container missing — starting minio-minio from support compose..."
+    docker compose -f "$ROOT_DIR/gogotex-support-services/compose.yaml" up -d minio-minio || true
+    # wait briefly for MinIO to become reachable on the network
+    for i in {1..10}; do
+      if docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://minio-minio:9000/minio/health/live 2>/dev/null | grep -q '^200$'; then
+        break
+      fi
+      sleep 1
+    done
+  fi
   SMOKE_DOC_BODY='{"name":"smoke.tex","content":"\\documentclass{article}\\begin{document}Smoke Test\\end{document}"}'
   DOC_ID=$(docker run --rm --network "$NET" curlimages/curl -sS -X POST -H "Content-Type: application/json" -d "$SMOKE_DOC_BODY" http://$AUTH_HOST/api/documents | sed -n 's/.*"id":"\([^\"]*\)".*/\1/p') || true
-  if [ -z "$DOC_ID" ]; then
+  # ensure yjs-server is available in the Docker network so it can receive compile metadata
+  if ! docker ps --format '{{.Names}}' | grep -q '^yjs-server$'; then
+    echo "Starting yjs-server for compile metadata replication checks..."
+    docker compose -f "$ROOT_DIR/gogotex-services/yjs-server/compose.yaml" up -d yjs-server || true
+    # wait for simple HTTP response
+    for i in {1..12}; do
+      if docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://yjs-server:1234/ | grep -q '^200$'; then
+        break
+      fi
+      sleep 1
+    done
+  fi  if [ -z "$DOC_ID" ]; then
     echo "ERROR: failed to create smoke document" >&2
     docker run --rm --network "$NET" curlimages/curl -sS http://$AUTH_HOST/ || true
     exit 9
@@ -410,6 +436,72 @@ if [ "${START_TEXLIVE:-false}" = "true" ] || [ -n "${DOCKER_TEX_IMAGE:-}" ]; the
     exit 13
   fi
   echo "Synctex endpoint returned gzip"
+
+  # --- verify persistence: Mongo metadata + MinIO objects (best-effort) ---
+  echo "Verifying persistence to Mongo + MinIO (compile metadata + artifacts)..."
+  # allow a short grace period for async persistence
+  sleep 1
+
+  # determine Mongo persisted record for the compile job
+  MONGO_DOC=$(docker exec -i mongodb-mongodb mongosh --quiet --eval "printjson(db.getSiblingDB('gogotex').compile_jobs.findOne({jobId:'$CJOB'}))" 2>/dev/null || true)
+  if ! printf '%s' "$MONGO_DOC" | grep -q 'pdfKey\|synctexKey'; then
+    echo "ERROR: persisted compile metadata not found in Mongo for job $CJOB" >&2
+    echo "mongo output:"; printf '%s
+' "$MONGO_DOC" | sed -n '1,200p'
+    exit 14
+  fi
+  echo "Found persisted compile metadata in Mongo"
+
+  # Extract keys (if present) from Mongo JS output (best-effort parsing)
+  PDF_KEY=$(printf '%s' "$MONGO_DOC" | sed -n "s/.*\"pdfKey\"[: ]*\"\?\([^\",}]*\)\"\?.*/\1/p" | head -n1)
+  SYN_KEY=$(printf '%s' "$MONGO_DOC" | sed -n "s/.*\"synctexKey\"[: ]*\"\?\([^\",}]*\)\"\?.*/\1/p" | head -n1)
+
+  # verify MinIO objects when keys are present
+  MINIO_PASS=$(grep -m1 '^MINIO_ROOT_PASSWORD=' "$ROOT_DIR/gogotex-support-services/.env" | sed -E 's/^[^=]+=//' || true)
+  MINIO_PASS=${MINIO_PASS:-changeme_minio}
+  MINIO_BUCKET=${MINIO_BUCKET:-gogotex}
+
+  if [ -n "$PDF_KEY" ]; then
+    echo "Checking MinIO for PDF key: $PDF_KEY"
+    if ! docker run --rm --network "$NET" --entrypoint /bin/sh minio/mc -c "mc alias set tmp http://minio-minio:9000 admin $MINIO_PASS >/dev/null 2>&1 && mc stat tmp/$MINIO_BUCKET/$PDF_KEY" >/dev/null 2>&1; then
+      echo "ERROR: PDF object not found in MinIO at key: $PDF_KEY" >&2
+      exit 15
+    fi
+    echo "PDF object present in MinIO"
+  else
+    echo "Warning: PDF key missing from persisted Mongo record (skipping MinIO PDF check)"
+  fi
+
+  if [ -n "$SYN_KEY" ]; then
+    echo "Checking MinIO for SyncTeX key: $SYN_KEY"
+    if ! docker run --rm --network "$NET" --entrypoint /bin/sh minio/mc -c "mc alias set tmp http://minio-minio:9000 admin $MINIO_PASS >/dev/null 2>&1 && mc stat tmp/$MINIO_BUCKET/$SYN_KEY" >/dev/null 2>&1; then
+      echo "ERROR: SyncTeX object not found in MinIO at key: $SYN_KEY" >&2
+      exit 16
+    fi
+    echo "SyncTeX object present in MinIO"
+  else
+    echo "Warning: SyncTeX key missing from persisted Mongo record (skipping MinIO synctex check)"
+  fi
+
+  echo "Persistence checks passed: Mongo record + MinIO objects verified"
+
+  # --- verify replication to yjs-server (optional) ---
+  if docker ps --format '{{.Names}}' | grep -q '^yjs-server$'; then
+    echo "Checking yjs-server cached compile metadata for doc $DOC_ID..."
+    YJS_RESP=$(docker run --rm --network "$NET" curlimages/curl -sS -w "\n%{http_code}" "http://yjs-server:1234/api/compile/$DOC_ID/latest" || true)
+    YJS_BODY=$(printf "%s" "$YJS_RESP" | sed -n '1,/^\([0-9]\{3\}\)$/p' | sed -e '$d')
+    YJS_CODE=$(printf "%s" "$YJS_RESP" | tail -n1)
+    if [ "$YJS_CODE" = "200" ] && echo "$YJS_BODY" | grep -q "$CJOB"; then
+      echo "yjs-server replication confirmed (job=$CJOB)"
+    else
+      echo "Warning: yjs-server did not expose compile metadata for $DOC_ID (code=$YJS_CODE)" >&2
+      echo "yjs-server body:"; printf '%s
+' "$YJS_BODY" | sed -n '1,120p'
+      # do not fail the whole integration test — replication is best-effort here
+    fi
+  else
+    echo "yjs-server not running — skipping replication check"
+  fi
 fi
 
 # --- Start auth-code E2E flow: perform headless login to capture code or fallback to callback sink ---

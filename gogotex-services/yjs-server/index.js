@@ -9,6 +9,7 @@ const { setupWSConnection } = require('./yjs-server');
 const PORT = process.env.WS_PORT || 1234;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/texlyre';
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_CACHE_TTL = parseInt(process.env.REDIS_CACHE_TTL) || 3600; // max seconds to cache compile metadata in Redis
 
 console.log('Starting TeXlyre Yjs Server...');
 console.log('MongoDB URI:', MONGODB_URI.replace(/\/\/.*:.*@/, '//***:***@'));
@@ -48,12 +49,77 @@ if (process.env.REDIS_CACHE_ENABLED === 'true') {
     console.log('⚠ Continuing without Redis cache');
     redisClient = null;
   });
+
+  // Subscribe to compile metadata updates published by backend services
+  (async () => {
+    if (!redisClient) return;
+    try {
+      await redisClient.subscribe('compile:updates', async (message) => {
+        try {
+          const payload = JSON.parse(message);
+          const docId = payload.docId || payload.docID || payload.documentId;
+          if (!docId) return;
+
+          // cache compile metadata for quick retrieval via HTTP
+          try {
+            await redisClient.setEx(`compile:doc:${docId}`, REDIS_CACHE_TTL, JSON.stringify(payload));
+          } catch (e) {
+            console.error('[Redis] failed to cache compile metadata:', e.message);
+          }
+
+          // broadcast to any WebSocket clients currently connected to the document
+          wss.clients.forEach((client) => {
+            try {
+              if (client.readyState === WebSocket.OPEN && client.docName === docId) {
+                client.send(JSON.stringify({ type: 'compile-update', payload }));
+              }
+            } catch (e) { /* ignore per-client failures */ }
+          });
+
+          console.log(`[compile] broadcasted update for doc=${docId}`);
+        } catch (err) {
+          console.error('Error handling compile:updates message:', err);
+        }
+      });
+      console.log('Subscribed to compile:updates channel');
+    } catch (err) {
+      console.error('Failed to subscribe to compile:updates:', err);
+    }
+  })();
 }
 
 // Create HTTP server
-const server = http.createServer((request, response) => {
-  response.writeHead(200, { 'Content-Type': 'text/plain' });
-  response.end('TeXlyre Yjs WebSocket Server\n');
+const server = http.createServer(async (request, response) => {
+  try {
+    const base = `http://${request.headers.host || 'localhost'}`;
+    const url = new URL(request.url, base);
+
+    // Simple API: return latest compile metadata cached for a document
+    // GET /api/compile/:docId/latest
+    const compileMatch = url.pathname.match(/^\/api\/compile\/([^\/]+)\/latest$/);
+    if (request.method === 'GET' && compileMatch) {
+      const docId = compileMatch[1];
+      if (redisClient && redisClient.isOpen) {
+        const cached = await redisClient.get(`compile:doc:${docId}`);
+        if (cached) {
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(cached);
+          return;
+        }
+      }
+      response.writeHead(404, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
+
+    // default info endpoint
+    response.writeHead(200, { 'Content-Type': 'text/plain' });
+    response.end('TeXlyre Yjs WebSocket Server\n');
+  } catch (err) {
+    console.error('HTTP handler error:', err);
+    response.writeHead(500, { 'Content-Type': 'text/plain' });
+    response.end('internal error');
+  }
 });
 
 // Create WebSocket server

@@ -15,6 +15,29 @@ test.describe('Editor (Phase‑03)', () => {
       } catch (e) { /* ignore */ }
     })
 
+    // stub WebSocket so we can simulate `compile-update` broadcasts from yjs-server
+    await page.addInitScript(() => {
+      (window as any).__FAKE_SOCKETS__ = []
+      class FakeWebSocket {
+        url: string
+        readyState: number
+        onopen: any = null
+        onmessage: any = null
+        onclose: any = null
+        onerror: any = null
+        constructor(url: string) {
+          this.url = url
+          this.readyState = 1 // OPEN
+          ;(window as any).__FAKE_SOCKETS__.push(this)
+          // notify open on next tick
+          setTimeout(() => { if (this.onopen) this.onopen({}) }, 0)
+        }
+        send(_d: any) { /* no-op */ }
+        close() { this.readyState = 3; if (this.onclose) this.onclose({}) }
+      }
+      ;(window as any).WebSocket = FakeWebSocket
+    })
+
     await page.goto(baseURL || 'http://frontend')
     await page.click('a[href="/editor"]')
     await expect(page).toHaveURL(/\/editor/) // ensure on editor page
@@ -258,6 +281,32 @@ test.describe('Editor (Phase‑03)', () => {
       await page.waitForTimeout(200)
       const caretLine = await page.evaluate(() => localStorage.getItem('gogotex.editor.caretLine'))
       expect(caretLine).toBe('5')
+
+      // --- realtime: simulate a `compile-update` broadcast from yjs-server and verify UI auto-refresh ---
+      await page.evaluate(() => {
+        const sockets = (window as any).__FAKE_SOCKETS__ || []
+        const s = sockets[0]
+        if (!s) return
+        const payload = {
+          type: 'compile-update',
+          payload: {
+            docId: 'CREATED_DOC',
+            jobId: 'job456',
+            previewUrl: '/api/documents/CREATED_DOC/preview?job=job456',
+            synctexMap: { pages: { '1': [{ y: 0.05, line: 1 }, { y: 0.5, line: 6 }] } }
+          }
+        }
+        // deliver message to page WS handler
+        if (s.onmessage) s.onmessage({ data: JSON.stringify(payload) })
+      })
+      // allow UI to process websocket message
+      await page.waitForTimeout(300)
+      // iframe src should update to the new preview URL
+      const src = await page.getAttribute('iframe[title="preview"]', 'src')
+      expect(src).toContain('job=job456')
+      // SyncTeX indicator should still be present (and updated)
+      await page.waitForSelector('.synctex-available', { timeout: 1000 })
+      
     } else {
       // Fallback: exercise autosave logic directly
       await page.evaluate(() => { try { localStorage.setItem('gogotex.editor.content', '\\documentclass{article}\\\n') } catch (e) {} })

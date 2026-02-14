@@ -91,6 +91,13 @@ const setupWSConnection = (conn, req, { persistence, redis }) => {
   
   const doc = getYDoc(docName);
   doc.gc = true;
+
+  // track active connections for this Y.Doc so we can clean up when no clients remain
+  doc._conns = doc._conns || new Set();
+  doc._conns.add(conn);
+
+  // expose the document name on the connection so external broadcasters can target clients
+  conn.docName = docName;
   
   // Load document state
   (async () => {
@@ -189,9 +196,10 @@ const setupWSConnection = (conn, req, { persistence, redis }) => {
     awareness.destroy();
     console.log(`Connection closed for ${docName}`);
     
-    // Clean up if no more connections
+    // Remove this connection from the tracked set and clean up if empty
+    if (doc._conns) doc._conns.delete(conn);
     setTimeout(() => {
-      if (doc.conns && doc.conns.size === 0) {
+      if (!doc._conns || doc._conns.size === 0) {
         docs.delete(docName);
         console.log(`Document ${docName} removed from memory`);
       }

@@ -15,10 +15,14 @@ import (
 	"sync"
 	"time"
 	"math"
+	"encoding/json"
 
 	"github.com/gin-gonic/gin"
 	documenthandler "github.com/gogotex/gogotex/backend/go-services/internal/document/handler"
 	documentservice "github.com/gogotex/gogotex/backend/go-services/internal/document/service"
+	"github.com/gogotex/gogotex/backend/go-services/internal/storage"
+	compilestore "github.com/gogotex/gogotex/backend/go-services/internal/compile"
+	"github.com/redis/go-redis/v9"
 )
 
 // Document is a lightweight in-memory document model used for Phase-03 UI flows.
@@ -41,17 +45,19 @@ type SyncEntry struct {
 }
 
 type CompileJob struct {
-	JobID     string    `json:"jobId"`
-	DocID     string    `json:"docId"`
-	Status    string    `json:"status"` // compiling|ready|canceled|error
-	Logs      string    `json:"logs"`
-	CreatedAt time.Time `json:"createdAt"`
+	JobID        string    `json:"jobId"`
+	DocID        string    `json:"docId"`
+	Status       string    `json:"status"` // compiling|ready|canceled|error
+	Logs         string    `json:"logs"`
+	CreatedAt    time.Time `json:"createdAt"`
 
 	// compiled artifacts (not serialized)
-	PDF        []byte                 `json:"-"`
-	Synctex    []byte                 `json:"-"`
-	SynctexMap map[int][]SyncEntry    `json:"-"`
-	ErrorMsg   string                 `json:"error,omitempty"`
+	PDF           []byte                 `json:"-"`
+	Synctex       []byte                 `json:"-"`
+	SynctexMap    map[int][]SyncEntry    `json:"-"`
+	OutputPDFKey  string                 `json:"outputPdfKey,omitempty"`
+	SynctexKey    string                 `json:"synctexKey,omitempty"`
+	ErrorMsg      string                 `json:"error,omitempty"`
 } 
 
 var (
@@ -62,6 +68,102 @@ var (
 	compileJobsMu sync.RWMutex
 	compileJobs   = map[string]*CompileJob{}
 )
+
+// Hooks (overridable for tests): upload/download to MinIO and persist to Mongo.
+var (
+	minioClientOnce sync.Once
+	minioClient     *storage.MinIOStorage
+
+	// upload bytes to MinIO (key should be a path-like string)
+	minioUploadFunc = func(ctx context.Context, key string, data []byte, contentType string) error {
+		cfg := storage.LoadMinIOConfig()
+		if cfg.Endpoint == "" {
+			return nil // MinIO not configured — noop for prototype
+		}
+		var err error
+		minioClientOnce.Do(func() {
+			minioClient, err = storage.NewMinIOStorage(cfg)
+		})
+		if err != nil {
+			return err
+		}
+		return minioClient.UploadFile(ctx, key, bytes.NewReader(data), int64(len(data)), contentType)
+	}
+
+	// download bytes from MinIO by key
+	minioDownloadFunc = func(ctx context.Context, key string) (io.ReadCloser, error) {
+		cfg := storage.LoadMinIOConfig()
+		if cfg.Endpoint == "" {
+			return nil, fmt.Errorf("minio not configured")
+		}
+		var err error
+		minioClientOnce.Do(func() {
+			minioClient, err = storage.NewMinIOStorage(cfg)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return minioClient.DownloadFile(ctx, key)
+	}
+
+	// persist compile metadata to Mongo (noop when MONGODB_URI unset)
+	persistCompileFunc = func(ctx context.Context, job *CompileJob) error {
+		mongoURI := os.Getenv("MONGODB_URI")
+		if mongoURI == "" {
+			return nil
+		}
+		dbName := os.Getenv("MONGODB_DATABASE")
+		if dbName == "" { dbName = "gogotex" }
+
+		pc := &compilestore.PersistedCompile{
+			JobID:      job.JobID,
+			DocID:      job.DocID,
+			Status:     job.Status,
+			CreatedAt:  job.CreatedAt,
+			UpdatedAt:  time.Now(),
+			PDFKey:     job.OutputPDFKey,
+			SynctexKey: job.SynctexKey,
+			SynctexMap: map[string][]map[string]any{},
+		}
+		// copy SynctexMap if present (convert int keys to string)
+		if job.SynctexMap != nil {
+			for p, arr := range job.SynctexMap {
+				k := fmt.Sprintf("%d", p)
+				for _, e := range arr {
+					pc.SynctexMap[k] = append(pc.SynctexMap[k], map[string]any{"y": e.Y, "line": e.Line})
+				}
+			}
+		}
+
+		// persist to MongoDB
+		if err := compilestore.Save(ctx, mongoURI, dbName, pc); err != nil {
+			return err
+		}
+
+		// best-effort: publish compile metadata to Redis channel so realtime services (yjs-server) can pick it up
+		redisHost := os.Getenv("REDIS_HOST")
+		redisPort := os.Getenv("REDIS_PORT")
+		if redisHost != "" {
+			addr := redisHost
+			if redisPort != "" {
+				addr = fmt.Sprintf("%s:%s", redisHost, redisPort)
+			}
+			// lightweight publish (no retry) — ignore errors
+			go func(payload *compilestore.PersistedCompile) {
+				defer func() { _ = recover() }()
+				c := redis.NewClient(&redis.Options{Addr: addr, Password: os.Getenv("REDIS_PASSWORD"), DB: 0})
+				ctx2, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				defer c.Close()
+				b, _ := json.Marshal(payload)
+				_ = c.Publish(ctx2, "compile:updates", string(b)).Err()
+			}(pc)
+		}
+
+		return nil
+	}
+)
+
 
 // RegisterDocumentRoutes registers minimal document endpoints used by the
 // Phase-03 frontend prototype (create, get, update).
@@ -381,6 +483,19 @@ func DownloadCompiled(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "job not ready"})
 		return
 	}
+	// Prefer persisted PDF from MinIO when available
+	if job.OutputPDFKey != "" {
+		if rc, err := minioDownloadFunc(c.Request.Context(), job.OutputPDFKey); err == nil {
+			defer rc.Close()
+			if b, rerr := io.ReadAll(rc); rerr == nil {
+				c.Header("Content-Type", "application/pdf")
+				c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.pdf\"", job.DocID))
+				c.Data(http.StatusOK, "application/pdf", b)
+				return
+			}
+		}
+	}
+
 	var pdf []byte
 	if len(job.PDF) > 0 {
 		pdf = job.PDF
@@ -407,6 +522,17 @@ func DownloadSynctex(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "job not ready"})
 		return
 	}
+	if job.SynctexKey != "" {
+		if rc, err := minioDownloadFunc(c.Request.Context(), job.SynctexKey); err == nil {
+			defer rc.Close()
+			if b, rerr := io.ReadAll(rc); rerr == nil {
+				c.Header("Content-Type", "application/gzip")
+				c.Data(http.StatusOK, "application/gzip", b)
+				return
+			}
+		}
+	}
+
 	if len(job.Synctex) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "synctex not available"})
 		return
@@ -450,6 +576,47 @@ func GetSyncTeXMap(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, out)
 		return
+	}
+
+	// Attempt to hydrate SynctexMap from persisted Mongo record when available
+	if os.Getenv("MONGODB_URI") != "" {
+		_ = func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			mongoURI := os.Getenv("MONGODB_URI")
+			db := os.Getenv("MONGODB_DATABASE")
+			if db == "" { db = "gogotex" }
+			// try to load persisted compile job
+			if pc, err := compilestore.Load(context.Background(), mongoURI, db, job.JobID); err == nil && pc != nil {
+				// convert persisted SynctexMap to job.SynctexMap
+				sm := map[int][]SyncEntry{}
+				for pk, arr := range pc.SynctexMap {
+					pnum, _ := strconv.Atoi(pk)
+					for _, it := range arr {
+						yv, _ := it["y"].(float64)
+						lnf, _ := it["line"].(float64)
+						sm[pnum] = append(sm[pnum], SyncEntry{Y: yv, Line: int(lnf)})
+					}
+				}
+				if len(sm) > 0 {
+					compileJobsMu.Lock()
+					job.SynctexMap = sm
+					compileJobsMu.Unlock()
+					out := map[string]interface{}{"pages": map[string]interface{}{}}
+					pages := out["pages"].(map[string]interface{})
+					for p, arr := range sm {
+						lst := make([]map[string]interface{}, 0, len(arr))
+						for _, e := range arr {
+							lst = append(lst, map[string]interface{}{"y": e.Y, "line": e.Line})
+						}
+						pages[fmt.Sprintf("%d", p)] = lst
+					}
+					c.JSON(http.StatusOK, out)
+					return nil
+				}
+			}
+			return nil
+		}()
 	}
 
 	// locate document content (best-effort)
@@ -569,6 +736,30 @@ func GetSyncTeXLookup(c *gin.Context) {
 	}
 
 	// prefer cached SynctexMap when available
+	if job.SynctexMap == nil && os.Getenv("MONGODB_URI") != "" {
+		// attempt to hydrate from Mongo
+		dbName := os.Getenv("MONGODB_DATABASE")
+		if dbName == "" {
+			dbName = "gogotex"
+		}
+		if pc, err := compilestore.Load(context.Background(), os.Getenv("MONGODB_URI"), dbName, job.JobID); err == nil && pc != nil {
+			sm := map[int][]SyncEntry{}
+			for pk, arr := range pc.SynctexMap {
+				pnum, _ := strconv.Atoi(pk)
+				for _, it := range arr {
+					yv, _ := it["y"].(float64)
+					lnf, _ := it["line"].(float64)
+					sm[pnum] = append(sm[pnum], SyncEntry{Y: yv, Line: int(lnf)})
+				}
+			}
+			if len(sm) > 0 {
+				compileJobsMu.Lock()
+				job.SynctexMap = sm
+				compileJobsMu.Unlock()
+			}
+		}
+	}
+
 	if job.SynctexMap != nil {
 		for p, arr := range job.SynctexMap {
 			for _, e := range arr {
@@ -805,6 +996,23 @@ func runCompileJob(j *CompileJob, content string, _name string) {
 						}
 						j.Status = "ready"
 						compileJobsMu.Unlock()
+
+						// async: try to persist artifacts to MinIO + Mongo (best-effort)
+						go func(job *CompileJob) {
+							ctx := context.Background()
+							pdfKey := fmt.Sprintf("documents/%s/compile/%s/output.pdf", job.DocID, job.JobID)
+							synKey := fmt.Sprintf("documents/%s/compile/%s/main.synctex.gz", job.DocID, job.JobID)
+							if len(job.PDF) > 0 {
+								_ = minioUploadFunc(ctx, pdfKey, job.PDF, "application/pdf")
+								job.OutputPDFKey = pdfKey
+							}
+							if len(job.Synctex) > 0 {
+								_ = minioUploadFunc(ctx, synKey, job.Synctex, "application/gzip")
+								job.SynctexKey = synKey
+							}
+							_ = persistCompileFunc(ctx, job)
+						}(j)
+
 						return
 					}
 				}
@@ -830,4 +1038,21 @@ func runCompileJob(j *CompileJob, content string, _name string) {
 	}
 	j.Status = "ready"
 	compileJobsMu.Unlock()
+
+	// async: persist fallback artifacts to MinIO + Mongo (best-effort)
+	go func(job *CompileJob) {
+		ctx := context.Background()
+		pdfKey := fmt.Sprintf("documents/%s/compile/%s/output.pdf", job.DocID, job.JobID)
+		synKey := fmt.Sprintf("documents/%s/compile/%s/main.synctex.gz", job.DocID, job.JobID)
+		if len(job.PDF) > 0 {
+			_ = minioUploadFunc(ctx, pdfKey, job.PDF, "application/pdf")
+			job.OutputPDFKey = pdfKey
+		}
+		if len(job.Synctex) > 0 {
+			_ = minioUploadFunc(ctx, synKey, job.Synctex, "application/gzip")
+			job.SynctexKey = synKey
+		}
+		_ = persistCompileFunc(ctx, job)
+	}(j)
 }
+
