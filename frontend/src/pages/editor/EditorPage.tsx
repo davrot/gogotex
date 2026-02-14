@@ -4,11 +4,15 @@ import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { useAuthStore } from '../../stores/authStore'
 import { yjsBinding } from '../../services/codemirrorYjsBinding'
+import { awarenessBinding } from '../../services/codemirrorAwarenessBinding'
+import { Extension } from '@codemirror/state'
 
 export const EditorPage: React.FC = () => {
   const saved = typeof window !== 'undefined' ? localStorage.getItem('gogotex.editor.content') || '' : ''
   const [value, setValue] = useState(saved)
   const [collabEnabled, setCollabEnabled] = useState(false)
+  const [extensions, setExtensions] = useState<Extension[]>([])
+  const [presence, setPresence] = useState<Array<{ name: string; color?: string }>>([])
   const ytextRef = useRef<Y.Text | null>(null)
   const providerRef = useRef<any>(null)
   const editorViewRef = useRef<any>(null)
@@ -49,22 +53,61 @@ export const EditorPage: React.FC = () => {
       setValue(ytext.toString())
     }
 
-    // create and attach CodeMirror <-> Yjs binding extension
+    // create and attach CodeMirror <-> Yjs binding extension + awareness overlay
     const bindingExt = yjsBinding(ytext)
-    setExtensions((prev) => {
-      // ensure binding is included only once
-      const others = prev.filter((e) => (e as any).spec && (e as any).spec.key !== 'yjs-binding')
-      return [...others, bindingExt]
-    })
+    const awarenessExt = awarenessBinding(provider.awareness)
+    setExtensions((prev) => [...prev, bindingExt, awarenessExt])
+
+    // setup awareness / presence (show user list)
+    try {
+      const awareness = provider.awareness
+      const localUser = useAuthStore.getState().user || { name: 'Anonymous', email: 'anon' }
+
+      const pickColor = (s: string | undefined) => {
+        if (!s) return '#888'
+        let h = 0
+        for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i)
+        return `hsl(${Math.abs(h) % 360} 70% 50%)`
+      }
+
+      // store user meta (name + color)
+      awareness.setLocalStateField('user', { name: localUser.name || localUser.email || 'Anonymous', color: pickColor(localUser.email) })
+
+      const onAwarenessChange = () => {
+        const states = Array.from(awareness.getStates().values()).map((s: any) => s.user).filter(Boolean)
+        // dedupe by name
+        const unique = Array.from(new Map(states.map((u: any) => [u.name, u])).values())
+        setPresence(unique)
+      }
+
+      awareness.on('change', onAwarenessChange)
+      // seed current presence
+      onAwarenessChange()
+
+      // store handler for cleanup later
+      (provider as any).__awarenessHandler = onAwarenessChange
+    } catch (e) {
+      console.warn('awareness setup failed', e)
+    }
 
     setCollabEnabled(true)
   }
 
   const stopCollab = () => {
-    if (providerRef.current) try { providerRef.current.disconnect() } catch (e) { /* ignore */ }
+    if (providerRef.current) {
+      try {
+        const handler = (providerRef.current as any).__awarenessHandler
+        if (handler && providerRef.current.awareness) {
+          try { providerRef.current.awareness.off('change', handler) } catch (e) { /* ignore */ }
+        }
+      } catch (e) { /* ignore */ }
+      try { providerRef.current.disconnect() } catch (e) { /* ignore */ }
+    }
     ytextRef.current = null
     providerRef.current = null
     setCollabEnabled(false)
+    setPresence([])
+    setExtensions([])
   }
 
   // Editor change handler — update Yjs when collaboration active (incremental)
@@ -113,11 +156,21 @@ export const EditorPage: React.FC = () => {
       </div>
 
       <div className="card">
-        <Editor initialValue={value} onChange={handleChange} />
+        <Editor initialValue={value} onChange={handleChange} extensions={extensions} onEditorReady={(v) => (editorViewRef.current = v)} />
       </div>
 
-      <div style={{marginTop:12}}>
-        <small>Realtime: {collabEnabled ? 'connected' : 'disconnected'}</small>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:12}}>
+        <div>
+          <small>Realtime: {collabEnabled ? 'connected' : 'disconnected'}</small>
+        </div>
+        <div>
+          <div style={{fontSize:12,color:'#666'}}>Users online:</div>
+          <div className="realtime-presence" style={{display:'flex',gap:8,marginTop:4}}>
+            {presence.map((p) => (
+              <span key={p.name} className="presence-user" data-user={p.name} style={{background:p.color, color:'#fff', padding:'4px 8px', borderRadius:999}}>{p.name}</span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   )

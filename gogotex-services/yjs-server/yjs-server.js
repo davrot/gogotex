@@ -172,8 +172,19 @@ const setupWSConnection = (conn, req, { persistence, redis }) => {
   syncProtocol.writeSyncStep1(encoder, doc);
   conn.send(encoding.toUint8Array(encoder));
 
-  const awarenessStates = new Map();
+  // Awareness handling for presence (send initial awareness to new client)
   const awareness = new awarenessProtocol.Awareness(doc);
+  try {
+    const states = Array.from(awareness.getStates().keys())
+    if (states.length > 0) {
+      const aenc = encoding.createEncoder()
+      encoding.writeVarUint(aenc, 1) // Message type: awareness
+      encoding.writeVarUint8Array(aenc, awarenessProtocol.encodeAwarenessUpdate(awareness, states))
+      conn.send(encoding.toUint8Array(aenc))
+    }
+  } catch (e) {
+    // ignore if no states yet
+  }
 
   conn.on('message', (message) => {
     try {
@@ -191,7 +202,32 @@ const setupWSConnection = (conn, req, { persistence, redis }) => {
           break;
           
         case 1: // Awareness
-          awarenessProtocol.applyAwarenessUpdate(awareness, decoding.readVarUint8Array(decoder), conn);
+          try {
+            const awarenessUpdate = decoding.readVarUint8Array(decoder)
+            awarenessProtocol.applyAwarenessUpdate(awareness, awarenessUpdate, conn)
+
+            // Broadcast the awareness update to other connections for this doc
+            if (doc._conns) {
+              for (const otherConn of doc._conns) {
+                if (otherConn !== conn && otherConn.readyState === 1) {
+                  const be = encoding.createEncoder()
+                  encoding.writeVarUint(be, 1)
+                  encoding.writeVarUint8Array(be, awarenessUpdate)
+                  try { otherConn.send(encoding.toUint8Array(be)) } catch (err) { /* ignore send errors */ }
+                }
+              }
+            }
+
+            // Publish to Redis so other instances can forward awareness updates (best-effort)
+            try {
+              if (redis && redis.isOpen) {
+                const b64 = Buffer.from(awarenessUpdate).toString('base64')
+                redis.publish(`yjs:awareness:${docName}`, JSON.stringify({ update: b64 })).catch(() => {})
+              }
+            } catch (e) { /* ignore redis errors */ }
+          } catch (err) {
+            console.error('[Awareness] failed to apply/broadcast awareness update', err)
+          }
           break;
           
         default:

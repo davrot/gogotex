@@ -1525,18 +1525,21 @@ docker-compose logs -f gogotex-realtime-server
 - [ ] Server starts and connects to Redis
 - [ ] Multiple clients can join same document
 - [ ] Document changes sync in real-time
-- [ ] Cursors visible across users
+- [x] Cursors visible across users
 - [ ] Users see who else is online
 - [ ] Reconnection after disconnect works
 - [ ] Updates persist to Redis
 
 ### Testing
-- [ ] Test with 2+ browser windows on same document
-- [ ] Verify real-time synchronization
-- [ ] Test cursor positions sync
+- [x] Test with 2+ browser windows on same document
+- [x] Verify real-time synchronization
+- [x] Test cursor positions sync
 - [ ] Test reconnection handling
 - [ ] Check Redis for persisted updates
 - [ ] Verify pub/sub across server instances
+- [x] WS auth negative test added (`gogotex-services/yjs-server/test-ws-auth.js`) and invoked from CI
+
+Notes: CI now starts `yjs-server` for realtime checks and runs the WS auth negative test; remaining items are reconnection tests and cross-instance pub/sub verification.
 
 ### Verification Commands
 

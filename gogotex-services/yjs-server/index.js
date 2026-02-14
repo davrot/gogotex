@@ -98,11 +98,30 @@ if (process.env.REDIS_CACHE_ENABLED === 'true') {
           const updateB64 = payload.update || payload.updateB64 || payload.u;
           if (!docName || !updateB64) return;
 
+          // awareness updates are published to yjs:awareness:<docName>
+          if (channel.startsWith('yjs:awareness:')) {
+            const awBytes = Buffer.from(updateB64, 'base64');
+            // forward raw awareness message to connected websocket clients (binary message type 1)
+            wss.clients.forEach((client) => {
+              try {
+                if (client.readyState === WebSocket.OPEN && client.docName === docName) {
+                  const enc = require('lib0/encoding').createEncoder();
+                  require('lib0/encoding').writeVarUint(enc, 1);
+                  require('lib0/encoding').writeVarUint8Array(enc, awBytes);
+                  client.send(require('lib0/encoding').toUint8Array(enc));
+                }
+              } catch (e) { /* ignore per-client failures */ }
+            });
+
+            console.log(`[yjs][awareness] broadcasted awareness for doc=${docName}`);
+            return;
+          }
+
           const update = Buffer.from(updateB64, 'base64');
           // apply to in-memory Y.Doc (function exported from yjs-server.js)
           await applyRemoteUpdate(docName, update);
 
-          // broadcast to websocket clients attached to the doc
+          // broadcast to websocket clients attached to the doc (inform clients about remote Yjs update)
           wss.clients.forEach((client) => {
             try {
               if (client.readyState === WebSocket.OPEN && client.docName === docName) {

@@ -25,6 +25,16 @@
 .cm-editor { @apply h-full border-0 outline-none; }
 .cm-scroller { @apply font-mono text-sm; }
 
+/* Realtime presence / remote cursors */
+.cm-remote-overlays { position: absolute; inset: 0; pointer-events: none; }
+.cm-remote-caret {
+  display: inline-block;
+  width: 2px;
+  background: var(--color-primary);
+  border-radius: 1px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.25);
+}
+.cm-remote-selection { border-radius: 3px; opacity: 0.25; }
 @media (max-width: 768px) {
   .cm-editor { font-size: 14px; }
 }

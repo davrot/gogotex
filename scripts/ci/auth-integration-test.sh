@@ -69,12 +69,58 @@ docker build \
 if ! docker run --rm gogotex-frontend:local sh -c "cat /usr/share/nginx/html/assets/index-*.js | grep -E -q '(\"mode\":\"auth_code\"|mode:\"auth_code\")'"; then
     echo 'ERROR: built frontend bundle missing "mode":"auth_code" (regression)' >&2
 fi
+# Ensure the frontend was built with the in-network AUTH_URL (prevents proxying to the wrong auth container)
+if ! docker run --rm gogotex-frontend:local sh -c "cat /usr/share/nginx/html/assets/index-*.js | grep -q 'gogotex-auth-integration'"; then
+    echo 'WARN: frontend build does not reference gogotex-auth-integration — it may POST to a proxied /auth/login (verify VITE_AUTH_URL build-arg and cache).' >&2
+fi
 
 echo "Starting frontend service for E2E auth-code test..."
 bash "$ROOT_DIR/gogotex-support-services/up_frontend.sh" || true
 
+# Post-deploy smoke check: ensure the running frontend serves the Phase-04 UI (prevents stale bundle)
+HTTP_CODE=000
+for i in {1..30}; do
+  HTTP_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://frontend/ || echo "000")
+  if [ "$HTTP_CODE" = "200" ]; then break; fi
+  sleep 1
+done
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "ERROR: frontend container not reachable (HTTP=$HTTP_CODE)" >&2
+  docker ps --filter network=$NET --format '  - {{.Names}} ({{.Status}}) {{.Image}}' >&2 || true
+  exit 9
+fi
+# Verify that the running frontend contains the realtime UI (guard against stale container)
+if ! docker run --rm --network "$NET" curlimages/curl -sS http://frontend/ | grep -q 'Enable realtime'; then
+  echo "ERROR: frontend container does not contain 'Enable realtime' — stale bundle? Recreating frontend." >&2
+  docker rm -f frontend >/dev/null 2>&1 || true
+  docker compose -f "$ROOT_DIR/gogotex-support-services/frontend-service/frontend.yaml" up -d --build frontend || true
+  sleep 2
+  if ! docker run --rm --network "$NET" curlimages/curl -sS http://frontend/ | grep -q 'Enable realtime'; then
+    echo "ERROR: frontend still stale after recreate; aborting." >&2
+    exit 9
+  fi
+fi
+
 # Run Playwright E2E (browser flow) if Playwright is available in CI
 # This step has its own script for better maintainability and a shell-level timeout
+# ensure yjs-server is available for realtime tests
+if ! docker ps --format '{{.Names}}' | grep -q '^yjs-server$'; then
+  echo "Starting yjs-server for realtime tests..."
+  docker compose -f "$ROOT_DIR/gogotex-services/yjs-server/compose.yaml" up -d yjs-server || true
+fi
+# wait (short) for yjs-server /health
+for i in $(seq 1 20); do
+  if docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://yjs-server:1234/ | grep -q '^200$'; then
+    echo "yjs-server healthy"
+    break
+  fi
+  sleep 1
+done
+
+# run WS auth negative test against yjs-server (expect rejection for missing token)
+echo "Running yjs-server WS auth negative test..."
+docker run --rm --network "$NET" -v "$ROOT_DIR/gogotex-services/yjs-server":/work -w /work node:20 sh -c "npm ci --no-audit --no-fund >/dev/null 2>&1 || true; node test-ws-auth.js" || { echo "yjs-server WS auth test failed" >&2; exit 1; }
+
 if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
   echo "Running Playwright E2E test (browser -> Keycloak -> frontend -> auth)..."
 
@@ -89,6 +135,19 @@ if [ "${RUN_PLAYWRIGHT:-true}" = "true" ]; then
   # Playwright run timeout (seconds) — shell-level guard to prevent hangs
   PLAYWRIGHT_RUN_TIMEOUT=${PLAYWRIGHT_RUN_TIMEOUT:-120}
   echo "Playwright runner timeout set to ${PLAYWRIGHT_RUN_TIMEOUT}s" >&2
+
+  # PRECHECK: ensure auth integration container is resolvable/reachable from Docker network
+  echo "Pre-check: verifying auth container reachable on network $NET..." >&2
+  AUTH_READY_CODE=$(docker run --rm --network "$NET" curlimages/curl -sS -o /dev/null -w "%{http_code}" http://gogotex-auth-integration:8081/ready || echo "000")
+  if [ "$AUTH_READY_CODE" != "200" ]; then
+    echo "ERROR: auth container 'gogotex-auth-integration' is not reachable (HTTP=$AUTH_READY_CODE) — Playwright will fail to contact backend." >&2
+    echo "Docker containers on network '$NET':" >&2
+    docker ps --filter network=$NET --format '  - {{.Names}} ({{.Status}}) {{.Image}}' >&2 || true
+    echo "Dumping recent logs from any auth containers for diagnosis:" >&2
+    docker logs gogotex-auth-integration 2>/dev/null | sed -n '1,200p' >&2 || true
+    docker logs gogotex-auth 2>/dev/null | sed -n '1,200p' >&2 || true
+    exit 8
+  fi
 
   # Ensure `timeout` is available (GNU coreutils). If missing, fall back to a background timer.
   if command -v timeout >/dev/null 2>&1; then

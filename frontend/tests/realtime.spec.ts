@@ -37,6 +37,8 @@ test('realtime: two clients synchronize editor text via yjs-server', async ({ br
   const ctxB = await browser.newContext()
   const pageA = await ctxA.newPage()
   const pageB = await ctxB.newPage()
+  pageA.on('console', (m) => console.log('PAGE-A CONSOLE ›', m.type(), m.text()))
+  pageB.on('console', (m) => console.log('PAGE-B CONSOLE ›', m.type(), m.text()))
 
   // Perform interactive OIDC login in both contexts so frontend has accessToken
   await performOidcLogin(pageA, baseURL!)
@@ -46,13 +48,21 @@ test('realtime: two clients synchronize editor text via yjs-server', async ({ br
   await pageA.goto(`${baseURL}/editor`)
   await pageB.goto(`${baseURL}/editor`)
 
-  // Enable realtime on both pages
-  await pageA.click('text=Enable realtime', { timeout: 5000 })
-  await pageB.click('text=Enable realtime', { timeout: 5000 })
+  // Enable realtime on both pages (wait for UI to render first)
+  await pageA.waitForSelector('text=Enable realtime', { timeout: 15000 })
+  await pageA.click('text=Enable realtime')
+  await pageB.waitForSelector('text=Enable realtime', { timeout: 15000 })
+  await pageB.click('text=Enable realtime')
 
   // Wait for provider to connect (UI text indicates connection)
   await pageA.waitForSelector('text=Realtime: connected', { timeout: 15000 })
   await pageB.waitForSelector('text=Realtime: connected', { timeout: 15000 })
+
+  // Presence: both pages should show the logged-in user in the presence list
+  await pageA.waitForSelector('.realtime-presence', { timeout: 5000 })
+  await pageB.waitForSelector('.realtime-presence', { timeout: 5000 })
+  await expect(pageA.locator('.realtime-presence')).toContainText(TEST_USER, { timeout: 5000 })
+  await expect(pageB.locator('.realtime-presence')).toContainText(TEST_USER, { timeout: 5000 })
 
   // Focus editor A and type
   await pageA.locator('.cm-editor').click()
@@ -60,6 +70,10 @@ test('realtime: two clients synchronize editor text via yjs-server', async ({ br
 
   // Assert B sees the change
   await expect(pageB.locator('.cm-editor')).toContainText('Hello from A', { timeout: 5000 })
+
+  // Remote caret for the typing user should be visible in the other client
+  await pageB.waitForSelector('.cm-remote-caret', { timeout: 5000 })
+  await expect(pageB.locator('.cm-remote-caret').first()).toHaveAttribute('data-user', TEST_USER)
 
   // Type in B and assert A sees update
   await pageB.locator('.cm-editor').click()
