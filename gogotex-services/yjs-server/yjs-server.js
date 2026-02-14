@@ -223,5 +223,34 @@ const setupWSConnection = (conn, req, { persistence, redis }) => {
   });
 };
 
-module.exports = { setupWSConnection };
+// Apply a remote update (base64 or Uint8Array) into an in-memory Y.Doc
+const applyRemoteUpdate = async (docName, update) => {
+  try {
+    const doc = docs.get(docName);
+    if (!doc) {
+      console.warn(`[applyRemoteUpdate] no in-memory doc for ${docName}, creating new one`);
+      const ydoc = new Y.Doc();
+      Y.applyUpdate(ydoc, update);
+      docs.set(docName, ydoc);
+      // persist newly created doc
+      await persistDoc(docName, ydoc, null, null).catch(() => {});
+      return;
+    }
+
+    Y.applyUpdate(doc, update);
+    console.log(`[applyRemoteUpdate] applied update to ${docName} (${update.length} bytes)`);
+
+    // Persist after applying
+    try {
+      await persistDoc(docName, doc, persistence, redis);
+    } catch (err) {
+      // persistence may be null in some test contexts
+      console.warn('[applyRemoteUpdate] persistence failed:', err && err.message ? err.message : err);
+    }
+  } catch (err) {
+    console.error('[applyRemoteUpdate] failed:', err);
+  }
+};
+
+module.exports = { setupWSConnection, applyRemoteUpdate };
 

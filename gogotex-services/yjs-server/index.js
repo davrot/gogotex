@@ -5,7 +5,7 @@ const { MongodbPersistence } = require('y-mongodb-provider');
 const { createClient } = require('redis');
 const http = require('http');
 const WebSocket = require('ws');
-const { setupWSConnection } = require('./yjs-server');
+const { setupWSConnection, applyRemoteUpdate } = require('./yjs-server');
 
 const PORT = process.env.WS_PORT || 1234;
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/texlyre';
@@ -88,8 +88,37 @@ if (process.env.REDIS_CACHE_ENABLED === 'true') {
         }
       });
       console.log('Subscribed to compile:updates channel');
+
+      // Listen for Yjs updates published by other instances/tools and apply them to in-memory docs
+      await redisClient.pSubscribe('yjs:*', async (message, channel) => {
+        try {
+          const parts = channel.split(':');
+          const docName = parts.slice(1).join(':');
+          const payload = JSON.parse(message);
+          const updateB64 = payload.update || payload.updateB64 || payload.u;
+          if (!docName || !updateB64) return;
+
+          const update = Buffer.from(updateB64, 'base64');
+          // apply to in-memory Y.Doc (function exported from yjs-server.js)
+          await applyRemoteUpdate(docName, update);
+
+          // broadcast to websocket clients attached to the doc
+          wss.clients.forEach((client) => {
+            try {
+              if (client.readyState === WebSocket.OPEN && client.docName === docName) {
+                client.send(JSON.stringify({ type: 'yjs-sync', documentId: docName, update: updateB64 }));
+              }
+            } catch (e) { /* ignore per-client failures */ }
+          });
+
+          console.log(`[yjs] applied & broadcast update for doc=${docName}`);
+        } catch (err) {
+          console.error('Error handling yjs:* message:', err);
+        }
+      });
+      console.log('Subscribed to yjs:* channel (pattern)');
     } catch (err) {
-      console.error('Failed to subscribe to compile:updates:', err);
+      console.error('Failed to subscribe to Redis channels:', err);
     }
   })();
 }

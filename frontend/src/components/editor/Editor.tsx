@@ -7,9 +7,10 @@ interface EditorProps {
   initialValue?: string
   onChange?: (v: string) => void
   extensions?: Extension[]
+  onEditorReady?: (view: EditorView) => void
 }
 
-export const Editor: React.FC<EditorProps> = ({ initialValue = '', onChange, extensions = [] }) => {
+export const Editor: React.FC<EditorProps> = ({ initialValue = '', onChange, extensions = [], onEditorReady }) => {
   const host = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
 
@@ -31,6 +32,8 @@ export const Editor: React.FC<EditorProps> = ({ initialValue = '', onChange, ext
       ],
     })
     viewRef.current = new EditorView({ state, parent: host.current })
+    // expose the EditorView to the parent so it can wire Yjs bindings
+    onEditorReady?.(viewRef.current)
     return () => { viewRef.current?.destroy(); viewRef.current = null }
   }, [extensions])
 

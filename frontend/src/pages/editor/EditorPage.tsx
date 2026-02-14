@@ -10,6 +10,8 @@ export const EditorPage: React.FC = () => {
   const [collabEnabled, setCollabEnabled] = useState(false)
   const ytextRef = useRef<Y.Text | null>(null)
   const providerRef = useRef<any>(null)
+  const editorViewRef = useRef<any>(null)
+  const applyingRemoteRef = useRef(false)
   const token = useAuthStore.getState().accessToken
 
   useEffect(() => {
@@ -17,6 +19,7 @@ export const EditorPage: React.FC = () => {
       // cleanup on unmount
       if (providerRef.current) try { providerRef.current.disconnect() } catch (e) { /* ignore */ }
       ytextRef.current = null
+      editorViewRef.current = null
       setCollabEnabled(false)
     }
   }, [])
@@ -45,10 +48,36 @@ export const EditorPage: React.FC = () => {
       setValue(ytext.toString())
     }
 
-    // observe remote changes
-    ytext.observe(() => {
-      const txt = ytext.toString()
-      setValue((prev) => (prev === txt ? prev : txt))
+    // observe remote changes and apply *incremental* updates into CodeMirror
+    ytext.observe((event) => {
+      try {
+        if (!editorViewRef.current) return
+        applyingRemoteRef.current = true
+        const newText = ytext.toString()
+        const oldText = editorViewRef.current.state.doc.toString()
+
+        if (newText === oldText) return
+
+        // compute minimal diff (prefix/suffix) and dispatch a single replace
+        let start = 0
+        const minLen = Math.min(oldText.length, newText.length)
+        while (start < minLen && oldText[start] === newText[start]) start++
+
+        let endOld = oldText.length - 1
+        let endNew = newText.length - 1
+        while (endOld >= start && endNew >= start && oldText[endOld] === newText[endNew]) {
+          endOld--
+          endNew--
+        }
+
+        const insert = newText.slice(start, endNew + 1)
+        editorViewRef.current.dispatch({ changes: { from: start, to: endOld + 1, insert } })
+        setValue(newText)
+      } catch (e) {
+        console.warn('apply remote ytext failed', e)
+      } finally {
+        applyingRemoteRef.current = false
+      }
     })
 
     setCollabEnabled(true)
@@ -61,20 +90,35 @@ export const EditorPage: React.FC = () => {
     setCollabEnabled(false)
   }
 
-  // Editor change handler — update Yjs when collaboration active
+  // Editor change handler — update Yjs when collaboration active (incremental)
   const handleChange = (v: string) => {
     setValue(v)
     try {
+      if (applyingRemoteRef.current) return
       if (collabEnabled && ytextRef.current) {
-        const txt = ytextRef.current.toString()
-        if (txt !== v) {
-          // naive full-text replace (simple prototype)
-          ytextRef.current.delete(0, txt.length)
-          ytextRef.current.insert(0, v)
+        const oldStr = ytextRef.current.toString()
+        if (oldStr === v) return
+
+        // compute minimal diff (prefix/suffix)
+        let start = 0
+        const minLen = Math.min(oldStr.length, v.length)
+        while (start < minLen && oldStr[start] === v[start]) start++
+
+        let endOld = oldStr.length - 1
+        let endNew = v.length - 1
+        while (endOld >= start && endNew >= start && oldStr[endOld] === v[endNew]) {
+          endOld--
+          endNew--
         }
+
+        const insert = v.slice(start, endNew + 1)
+        const deleteLen = Math.max(0, endOld - start + 1)
+
+        if (deleteLen > 0) ytextRef.current.delete(start, deleteLen)
+        if (insert.length > 0) ytextRef.current.insert(start, insert)
       }
     } catch (e) {
-      console.warn('Yjs update failed', e)
+      console.warn('Yjs incremental update failed', e)
     }
   }
 
