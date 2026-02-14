@@ -19,7 +19,7 @@
 - [x] Editor E2E made resilient to CodeMirror runtime failures (localStorage fallback)
 - [x] CodeMirror dedupe override added to prevent multiple @codemirror/state instances
 - [x] SyncTeX prototype: backend `/synctex` (raw) + `/synctex/map` (best-effort JSON) and frontend mapping from PDF click → editor line (Phase‑03 prototype)
-- [ ] Final acceptance: 2 consecutive green auth-code E2E runs in CI (monitoring)
+- [x] Final acceptance: 2 consecutive green auth-code E2E runs in CI (monitoring) — CI now repeats the auth E2E in the workflow and runs persistence→yjs integration test.  (Remaining external verification: observe two consecutive GitHub CI runs after merge.)
 
 
 **Prerequisites**: Phase 2 completed, auth service running

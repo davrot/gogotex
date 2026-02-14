@@ -1,6 +1,14 @@
 import React from 'react'
 import { render, screen, waitFor } from '@testing-library/react'
-import '@testing-library/jest-dom'
+import { test, expect, vi } from 'vitest'
+
+// mock lazy-imported DocumentList used by EditorPage (keeps unit test focused)
+vi.mock('../../components/document/DocumentList', () => ({
+  default: (props: any) => {
+    return (<div data-testid="doc-list-mock">mocked</div>)
+  }
+}))
+
 import EditorPage from './EditorPage'
 
 // Lightweight unit test for the EditorPage WebSocket handler (compile-update)

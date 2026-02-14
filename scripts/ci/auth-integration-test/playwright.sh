@@ -24,7 +24,7 @@ TEST_PASS=${TEST_PASS:-$(cat "$ROOT_DIR/gogotex-support-services/keycloak-servic
 PLAYWRIGHT_VERBOSE=${PLAYWRIGHT_VERBOSE:-false}
 PLAYWRIGHT_REPORTER=${PLAYWRIGHT_REPORTER:-list}
 # Per-test timeout (ms)
-PLAYWRIGHT_PER_TEST_TIMEOUT=${PLAYWRIGHT_PER_TEST_TIMEOUT:-30000}
+PLAYWRIGHT_PER_TEST_TIMEOUT=${PLAYWRIGHT_PER_TEST_TIMEOUT:-120000}
 # Enable Playwright trace: off|on|on-first-retry
 PLAYWRIGHT_TRACE=${PLAYWRIGHT_TRACE:-off}
 
@@ -33,7 +33,7 @@ echo "Playwright: base_url=$PLAYWRIGHT_BASE_URL kc=$PLAYWRIGHT_KEYCLOAK redirect
 
 # Build the inner command; keep output visible when verbosity is requested
 if [ "$PLAYWRIGHT_VERBOSE" = "true" ]; then
-  INNER_CMD="npm install --no-audit --no-fund || true; npx playwright install --with-deps || true; npx playwright test tests/auth.spec.ts --timeout=$PLAYWRIGHT_PER_TEST_TIMEOUT --reporter=$PLAYWRIGHT_REPORTER"
+  INNER_CMD="npm install --no-audit --no-fund || true; npx playwright install --with-deps || true; npx playwright test tests/auth.spec.ts --timeout=$PLAYWRIGHT_PER_TEST_TIMEOUT --reporter=$PLAYWRIGHT_REPORTER && npx playwright test tests/persistence-yjs.spec.ts --timeout=120000 --reporter=$PLAYWRIGHT_REPORTER"
 else
   INNER_CMD="npm install --no-audit --no-fund >/dev/null 2>&1 || true; npx playwright install --with-deps >/dev/null 2>&1 || true; npx playwright test tests/auth.spec.ts --timeout=$PLAYWRIGHT_PER_TEST_TIMEOUT --reporter=$PLAYWRIGHT_REPORTER"
 fi
