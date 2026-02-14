@@ -1,0 +1,33 @@
+name: Frontend Unit Tests
+
+on:
+  push:
+    paths:
+      - 'frontend/**'
+  pull_request:
+    paths:
+      - 'frontend/**'
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Run unit tests (Vitest)
+        working-directory: frontend
+        run: npm run test:unit
+
+      - name: Build (smoke)
+        working-directory: frontend
+        run: npm run build --if-present

@@ -254,5 +254,16 @@ const applyRemoteUpdate = async (docName, update) => {
   }
 };
 
-module.exports = { setupWSConnection, applyRemoteUpdate };
+const getInMemoryDocText = (docName) => {
+  const doc = docs.get(docName);
+  if (!doc) return null;
+  try {
+    const ytext = doc.getText ? doc.getText('codemirror') : null;
+    return ytext ? ytext.toString() : null;
+  } catch (err) {
+    return null;
+  }
+};
+
+module.exports = { setupWSConnection, applyRemoteUpdate, getInMemoryDocText };
 

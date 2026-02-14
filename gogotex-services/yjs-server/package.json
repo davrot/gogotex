@@ -7,7 +7,13 @@
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
-  "keywords": ["yjs", "websocket", "mongodb", "redis", "collaborative"],
+  "keywords": [
+    "yjs",
+    "websocket",
+    "mongodb",
+    "redis",
+    "collaborative"
+  ],
   "author": "",
   "license": "AGPL-3.0",
   "dependencies": {
@@ -26,4 +32,3 @@
     "nodemon": "^3.1.0"
   }
 }
-
