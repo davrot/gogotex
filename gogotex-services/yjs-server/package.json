@@ -19,7 +19,8 @@
     "yjs": "^13.6.18",
     "lib0": "^0.2.97",
     "y-protocols": "^1.0.6",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "jsonwebtoken": "^9.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

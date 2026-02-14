@@ -150,6 +150,18 @@ const setupWSConnection = (conn, req, { persistence, redis }) => {
     if (origin !== conn) {
       debouncedPersist();
     }
+
+    // publish Yjs update to Redis so other instances (or tools) can react
+    if (redis && redis.isOpen) {
+      try {
+        const updateB64 = Buffer.from(update).toString('base64');
+        redis.publish(`yjs:${docName}`, JSON.stringify({ update: updateB64 })).catch((e) => {
+          console.error('[Redis] failed to publish yjs update:', e.message);
+        });
+      } catch (err) {
+        console.error('[Yjs] Error publishing update to Redis:', err.message);
+      }
+    }
   };
 
   doc.on('update', updateHandler);

@@ -24,7 +24,9 @@
         "@codemirror/theme-one-dark": "^0.19.1",
         "@codemirror/legacy-modes": "^0.19.1",
         "@codemirror/autocomplete": "^0.22.1",
-        "@codemirror/lint": "^0.22.0"
+        "@codemirror/lint": "^0.22.0",
+        "yjs": "^13.6.18",
+        "y-websocket": "^1.4.5"
     },
     "devDependencies": {
         "@types/react": "^18.0.28",

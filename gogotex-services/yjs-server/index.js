@@ -1,4 +1,5 @@
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
 const Y = require('yjs');
 const { MongodbPersistence } = require('y-mongodb-provider');
 const { createClient } = require('redis');
@@ -11,9 +12,14 @@ const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/texlyr
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const REDIS_CACHE_TTL = parseInt(process.env.REDIS_CACHE_TTL) || 3600; // max seconds to cache compile metadata in Redis
 
+const JWT_SECRET = process.env.JWT_SECRET || '';
+const AUTH_REQUIRED = JWT_SECRET.length > 0;
+
 console.log('Starting TeXlyre Yjs Server...');
 console.log('MongoDB URI:', MONGODB_URI.replace(/\/\/.*:.*@/, '//***:***@'));
 console.log('Redis URL:', REDIS_URL.replace(/\/\/.*:.*@/, '//***:***@'));
+if (AUTH_REQUIRED) console.log('WebSocket authentication: ENABLED');
+else console.log('WebSocket authentication: disabled (no JWT_SECRET)');
 
 // Initialize MongoDB persistence
 const mdb = new MongodbPersistence(MONGODB_URI, {
@@ -94,6 +100,19 @@ const server = http.createServer(async (request, response) => {
     const base = `http://${request.headers.host || 'localhost'}`;
     const url = new URL(request.url, base);
 
+    // Health endpoint
+    if (request.method === 'GET' && url.pathname === '/health') {
+      const health = {
+        status: 'healthy',
+        redis: redisClient && redisClient.isOpen ? 'ready' : 'disabled',
+        mongodb: mdb ? 'initialized' : 'disabled',
+        uptime: process.uptime(),
+      };
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify(health));
+      return;
+    }
+
     // Simple API: return latest compile metadata cached for a document
     // GET /api/compile/:docId/latest
     const compileMatch = url.pathname.match(/^\/api\/compile\/([^\/]+)\/latest$/);
@@ -145,6 +164,40 @@ const wss = new WebSocket.Server({
 wss.on('connection', (ws, req) => {
   const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
   console.log(`New connection from ${ip}`);
+
+  // Optional JWT auth: accept token in query (?token=...) or in 'sec-websocket-protocol' header
+  if (AUTH_REQUIRED) {
+    const extractTokenFromReq = (r) => {
+      try {
+        const base = `http://${r.headers.host || 'localhost'}`;
+        const u = new URL(r.url, base);
+        const q = u.searchParams.get('token');
+        if (q) return q;
+      } catch (e) { /* ignore */ }
+      const proto = r.headers['sec-websocket-protocol'] || r.headers['authorization'];
+      if (!proto) return null;
+      const token = String(proto).split(',')[0].trim();
+      if (token.startsWith('Bearer ')) return token.slice(7);
+      return token;
+    };
+
+    const token = extractTokenFromReq(req);
+    if (!token) {
+      console.warn('WebSocket connection rejected: missing token');
+      ws.close(1008, 'Authentication required');
+      return;
+    }
+
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      ws.user = payload;
+      console.log('WebSocket authenticated ->', payload.sub || payload.email || '<user>');
+    } catch (err) {
+      console.warn('WebSocket authentication failed:', err.message);
+      ws.close(1008, 'Unauthorized');
+      return;
+    }
+  }
   
   setupWSConnection(ws, req, { 
     persistence: mdb,

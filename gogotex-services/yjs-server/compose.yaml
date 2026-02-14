@@ -13,8 +13,15 @@ services:
       - NODE_ENV=production
       - REDIS_CACHE_ENABLED=true
       - REDIS_CACHE_TTL=3600
+      - JWT_SECRET=${JWT_SECRET}
       - MONGODB_FLUSH_SIZE=100
       - MONGODB_MULTIPLE_COLLECTIONS=true
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:1234/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       - tex-network
     volumes:
