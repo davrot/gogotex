@@ -1,0 +1,72 @@
+name: Frontend E2E (Phase-03)
+
+on:
+  workflow_dispatch: {}
+  push:
+    paths:
+      - 'frontend/**'
+      - 'scripts/ci/**'
+      - 'phases/PHASE-03-frontend-basics.md'
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      docker:
+        image: docker:24-dind
+        options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps
+
+      - name: Prepare TeX worker (pull image + start service)
+        run: |
+          docker pull blang/latex:ubuntu
+          docker compose -f gogotex-support-services/compose.yaml up -d texlive
+
+      - name: Start external go-document service (Phase‑05)
+        run: |
+          docker compose -f gogotex-support-services/compose.yaml up -d gogotex-go-document
+
+      - name: Run auth integration script (includes Playwright)
+        env:
+          CLEANUP: "true"
+          RUN_PLAYWRIGHT: "true"
+          PLAYWRIGHT_LOCAL_IMAGE: "ghcr.io/${{ github.repository_owner }}/gogotex-playwright:ci"
+          PLAYWRIGHT_PER_TEST_TIMEOUT: "120000"
+          KEYCLOAK_DEBUG: "false"
+          FAIL_ON_AUTH_CODE: "true"
+          DOCKER_TEX_IMAGE: "blang/latex:ubuntu"
+          START_TEXLIVE: "true"
+          DOC_SERVICE_EXTERNAL: "true"
+        run: |
+          chmod +x ./scripts/ci/auth-integration-test.sh
+          ./scripts/ci/auth-integration-test.sh
+
+      - name: Repeat Playwright auth E2E (second run)
+        if: success()
+        env:
+          PLAYWRIGHT_LOCAL_IMAGE: "ghcr.io/${{ github.repository_owner }}/gogotex-playwright:ci"
+          PLAYWRIGHT_PER_TEST_TIMEOUT: "120000"
+        run: |
+          chmod +x ./scripts/ci/auth-integration-test/playwright.sh
+          ./scripts/ci/auth-integration-test/playwright.sh
+
+      - name: Upload Playwright traces (if any)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/**/trace.zip
