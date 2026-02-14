@@ -3,6 +3,7 @@ import Editor from '../../components/editor/Editor'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import { useAuthStore } from '../../stores/authStore'
+import { yjsBinding } from '../../services/codemirrorYjsBinding'
 
 export const EditorPage: React.FC = () => {
   const saved = typeof window !== 'undefined' ? localStorage.getItem('gogotex.editor.content') || '' : ''
@@ -48,36 +49,12 @@ export const EditorPage: React.FC = () => {
       setValue(ytext.toString())
     }
 
-    // observe remote changes and apply *incremental* updates into CodeMirror
-    ytext.observe((event) => {
-      try {
-        if (!editorViewRef.current) return
-        applyingRemoteRef.current = true
-        const newText = ytext.toString()
-        const oldText = editorViewRef.current.state.doc.toString()
-
-        if (newText === oldText) return
-
-        // compute minimal diff (prefix/suffix) and dispatch a single replace
-        let start = 0
-        const minLen = Math.min(oldText.length, newText.length)
-        while (start < minLen && oldText[start] === newText[start]) start++
-
-        let endOld = oldText.length - 1
-        let endNew = newText.length - 1
-        while (endOld >= start && endNew >= start && oldText[endOld] === newText[endNew]) {
-          endOld--
-          endNew--
-        }
-
-        const insert = newText.slice(start, endNew + 1)
-        editorViewRef.current.dispatch({ changes: { from: start, to: endOld + 1, insert } })
-        setValue(newText)
-      } catch (e) {
-        console.warn('apply remote ytext failed', e)
-      } finally {
-        applyingRemoteRef.current = false
-      }
+    // create and attach CodeMirror <-> Yjs binding extension
+    const bindingExt = yjsBinding(ytext)
+    setExtensions((prev) => {
+      // ensure binding is included only once
+      const others = prev.filter((e) => (e as any).spec && (e as any).spec.key !== 'yjs-binding')
+      return [...others, bindingExt]
     })
 
     setCollabEnabled(true)

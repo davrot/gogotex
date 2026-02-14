@@ -33,7 +33,7 @@ export const Editor: React.FC<EditorProps> = ({ initialValue = '', onChange, ext
     })
     viewRef.current = new EditorView({ state, parent: host.current })
     // expose the EditorView to the parent so it can wire Yjs bindings
-    onEditorReady?.(viewRef.current)
+    try { onEditorReady?.(viewRef.current) } catch (e) { /* ignore */ }
     return () => { viewRef.current?.destroy(); viewRef.current = null }
   }, [extensions])
 
