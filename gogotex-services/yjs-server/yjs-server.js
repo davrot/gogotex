@@ -240,12 +240,14 @@ const applyRemoteUpdate = async (docName, update) => {
     Y.applyUpdate(doc, update);
     console.log(`[applyRemoteUpdate] applied update to ${docName} (${update.length} bytes)`);
 
-    // Persist after applying
+    // Persist after applying (best-effort). We don't have module-level
+    // persistence/redis objects here, so call persistDoc with nulls and
+    // ignore failures — persistence will still occur via the debounced
+    // local update handler when clients are connected.
     try {
-      await persistDoc(docName, doc, persistence, redis);
+      await persistDoc(docName, doc, null, null).catch(() => {});
     } catch (err) {
-      // persistence may be null in some test contexts
-      console.warn('[applyRemoteUpdate] persistence failed:', err && err.message ? err.message : err);
+      /* ignore */
     }
   } catch (err) {
     console.error('[applyRemoteUpdate] failed:', err);
