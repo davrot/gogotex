@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { EditorState } from '@codemirror/state'
-import { EditorView, basicSetup } from '@codemirror/basic-setup'
+import { EditorView } from '@codemirror/view'
 import * as Y from 'yjs'
 import { yjsBinding } from '../codemirrorYjsBinding'
 
@@ -9,7 +9,7 @@ describe('codemirrorYjsBinding', () => {
     const ydoc = new Y.Doc()
     const ytext = ydoc.getText('codemirror')
 
-    const state = EditorState.create({ doc: 'local', extensions: [basicSetup, yjsBinding(ytext)] })
+    const state = EditorState.create({ doc: 'local', extensions: [yjsBinding(ytext)] })
     const mount = document.createElement('div')
     const view = new EditorView({ state, parent: mount })
 
@@ -24,7 +24,7 @@ describe('codemirrorYjsBinding', () => {
     const ydoc = new Y.Doc()
     const ytext = ydoc.getText('codemirror')
 
-    const state = EditorState.create({ doc: '', extensions: [basicSetup, yjsBinding(ytext)] })
+    const state = EditorState.create({ doc: '', extensions: [yjsBinding(ytext)] })
     const mount = document.createElement('div')
     const view = new EditorView({ state, parent: mount })
 
