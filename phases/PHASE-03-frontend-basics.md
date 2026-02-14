@@ -1160,6 +1160,7 @@ Files: `backend/go-services/handlers/documents.go`, `backend/go-services/interna
 
 - Backend unit/integration: `backend/go-services/handlers/documents_test.go` (SyncTeX parsing, compile persistence).
 - Frontend Playwright: `frontend/tests/editor.spec.ts` updated to stub and exercise SyncTeX map/lookup.
+- Frontend Playwright (integration): `frontend/tests/persistence-yjs.spec.ts` — verifies compile → MinIO + Mongo persistence and yjs-server replication (skippable in local dev).
 - CI script: `scripts/ci/auth-integration-test.sh` updated to verify persistence + replication.
 
 ### Next steps / TODO (recommended)
