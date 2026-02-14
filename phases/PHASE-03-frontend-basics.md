@@ -1166,7 +1166,7 @@ Files: `backend/go-services/handlers/documents.go`, `backend/go-services/interna
 
 - [x] Frontend WS listener added — `EditorPage.tsx` subscribes to `yjs-server` and handles `{ type: 'compile-update' }` to refresh `previewUrl`, `jobId` and `synctexMap`.
 - [x] Playwright E2E updated to simulate `compile-update` and assert UI auto-refresh (`frontend/tests/editor.spec.ts`).
-- [ ] Add a focused unit test for the WS handler (small, non-blocking).
+- [x] Add a focused unit test for the WS handler (small, non-blocking).
 
 *Notes:* the WS integration improves UX by letting other services (backend → Redis → yjs-server) push compile results to connected editor clients in real time.
 
